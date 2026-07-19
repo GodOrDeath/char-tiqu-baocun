@@ -1,8 +1,10 @@
 {
-    "display_name": "自创角色存入",
-    "name": "char-tiqu-baocun",
-    "version": "2.0.1",
-    "author": "GodOrDeath",
-    "description": "通过OpenAI API自动分析聊天记录，将新角色存入专属世界书。",
-    "loading_order": 10
+    "display_name": "AI 角色设定提取器",
+    "name": "ai-char-extractor",
+    "description": "使用独立的第三方中转 API (OpenAI格式)，支持温度/Token限制，智能获取角色设定。",
+    "version": "2.1.0",
+    "author": "YourName",
+    "main": "index.js",
+    "require": ["st-script"],
+    "optional": []
 }
