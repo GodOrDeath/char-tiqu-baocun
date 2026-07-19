@@ -1,25 +1,29 @@
-// ============================================================
-// 修正导入：使用 getContext 获取核心 API，其余从 window 补充
-// ============================================================
+// ================================================================
+// 1. 导入官方 API（与 Anima 一致）
+// ================================================================
 import { getContext } from '../../extensions.js';
 
+// ================================================================
+// 2. 获取核心上下文
+// ================================================================
 const context = getContext();
 
-// 优先从 context 获取，如果不存在则从 window 获取（兼容性）
-const eventSource = context.eventSource || window.eventSource;
-const event_types = context.event_types || window.event_types;
-const saveWorldInfo = context.saveWorldInfo || window.saveWorldInfo;
-const saveCharacter = context.saveCharacter || window.saveCharacter;
-const chat_metadata = context.chat_metadata || window.chat_metadata;
-const extension_settings = context.extension_settings || window.extension_settings;
-const saveSettingsDebounced = context.saveSettingsDebounced || window.saveSettingsDebounced;
-const worldInfo = window.worldInfo;        // 通常在 window 上
-const characters = window.characters;      // 通常在 window 上
+// 从 context 获取 eventSource，其他变量从 window 获取（兼容性）
+const { eventSource, event_types } = context;
+// 全局对象直接取用
+const worldInfo = window.worldInfo;
+const characters = window.characters;
+const chat_metadata = window.chat_metadata;
+const extension_settings = window.extension_settings;
+const saveSettingsDebounced = window.saveSettingsDebounced;
+const saveWorldInfo = window.saveWorldInfo;
+const saveCharacter = window.saveCharacter;
+// toastr 直接从 window
+const toastr = window.toastr;
 
-// ============================================================
-// 以下代码与您原代码完全一致，但已去除所有 window.SillyTavern?.getContext?.()
-// 并改用外部 context 或直接使用上述变量
-// ============================================================
+// ================================================================
+// 3. 以下全部是您的原始业务逻辑，仅微调函数内的 context 引用
+// ================================================================
 
 const EXTENSION_NAME = '自创角色存入';
 const TAG_PREFIX = 'auto_dynamic';
@@ -93,8 +97,6 @@ function clearAutoEntriesForChar(charName) {
 }
 
 function safeSetVariable(key, value) {
-    // 使用外部 context
-    if (!context) return;
     if (typeof context.setVariable === 'function') {
         context.setVariable(key, value);
     } else {
@@ -103,7 +105,6 @@ function safeSetVariable(key, value) {
 }
 
 function safeGetVariable(key) {
-    if (!context) return undefined;
     if (typeof context.getVariable === 'function') {
         return context.getVariable(key);
     }
@@ -286,7 +287,6 @@ async function analyzeAndProcessMessage(messageId) {
         return;
     }
 
-    // 使用外部 context
     const msg = context.chat[messageId];
     if (!msg || msg.is_system || msg.is_user) return;
 
@@ -415,9 +415,9 @@ function onCharLoaded() {
     bindWorldBookToChar(charName);
 }
 
-// ============================================================
-// 事件注册
-// ============================================================
+// ================================================================
+// 4. 事件注册（与 Anima 一致）
+// ================================================================
 eventSource.on(event_types.MESSAGE_RECEIVED, onNewMessage);
 eventSource.on(event_types.MESSAGE_SENT, onNewMessage);
 eventSource.on(event_types.MESSAGE_DELETED, onMessageDeleted);
@@ -425,9 +425,9 @@ eventSource.on(event_types.MESSAGE_UPDATED, onMessageUpdated);
 eventSource.on(event_types.NEW_CHAT, onNewChat);
 eventSource.on(event_types.CHARACTER_LOADED, onCharLoaded);
 
-// ============================================================
-// 斜杠命令
-// ============================================================
+// ================================================================
+// 5. 斜杠命令
+// ================================================================
 if (context?.addSlashCommand) {
     context.addSlashCommand('clear-auto-worldbook', () => {
         const charName = getCurrentCharName();
@@ -447,13 +447,11 @@ if (context?.addSlashCommand) {
         }
         return `World book "${bookName}" not found.`;
     });
-} else {
-    console.warn('[自创角色存入] addSlashCommand not available');
 }
 
-// ============================================================
-// 设置面板（API配置） - 使用更稳健的注入方式
-// ============================================================
+// ================================================================
+// 6. 设置面板注入（原生 JS，不依赖 jQuery）
+// ================================================================
 function generateSettingsHtml() {
     const settings = getSettings().openai;
     return `
@@ -502,8 +500,8 @@ function attachSettingsListeners() {
             settings.openai.contextMessages = parseInt(document.getElementById('auto_char_wb_context_msgs').value) || 2;
             settings.openai.maxTokens = parseInt(document.getElementById('auto_char_wb_max_tokens').value) || 1500;
             saveSettings();
-            if (window.toastr) {
-                window.toastr.success('OpenAI 设置已保存');
+            if (toastr) {
+                toastr.success('OpenAI 设置已保存');
             } else {
                 alert('OpenAI 设置已保存');
             }
@@ -511,8 +509,8 @@ function attachSettingsListeners() {
     }
 }
 
-// 使用 setTimeout 确保 DOM 完全加载后再注入设置面板
-setTimeout(() => {
+// 使用 MutationObserver 或 DOMContentLoaded 确保目标容器存在
+function injectSettingsPanel() {
     const container = document.getElementById('extensions_settings');
     if (container && !container.querySelector('.auto-char-worldbook-settings-section')) {
         const section = document.createElement('div');
@@ -531,5 +529,18 @@ setTimeout(() => {
         container.appendChild(section);
         attachSettingsListeners();
         console.log('[自创角色存入] 设置面板已注入');
+    } else {
+        // 如果容器还没出现，稍后重试
+        setTimeout(injectSettingsPanel, 500);
     }
-}, 1000);
+}
+
+// 等待 DOM 就绪
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', injectSettingsPanel);
+} else {
+    injectSettingsPanel();
+}
+
+// 导出无内容，但扩展已经自启动
+console.log(`[${EXTENSION_NAME}] 扩展已成功加载！`);
