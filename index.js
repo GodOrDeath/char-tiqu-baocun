@@ -43,7 +43,7 @@ jQuery(async () => {
     }
     extensionSettings = context.extension_settings[extensionName];
 
-    // 1. 加载后台 API 设置界面 (仍然放在扩展设置中, 避免污染底布空间)
+    // 1. 加载后台API设置界面
     try {
         const htmlUrl = import.meta.url.replace('index.js', 'settings.html');
         const settingsHtml = await $.get(htmlUrl);
@@ -87,8 +87,8 @@ jQuery(async () => {
 
         toastr.info(`正在联系 AI 分析【${char.name}】...`);
 
-        // 将按钮变为 "提取中" 动画状态
-        $('#btn_ai_extract_char').css('opacity', '0.5').css('pointer-events', 'none').html('<i class="fa-solid fa-spinner fa-spin"></i> 正在提取...');
+        // 按钮进入加载状态
+        $('#btn_ai_extract_char').css('opacity', '0.5').css('pointer-events', 'none').html('<i class="fa-solid fa-spinner fa-spin"></i> 提取中...');
 
         try {
             const prompt = `你是一个精准的文本分析助手。请总结下方角色设定，填入对应项，若无该项则填“未提及”。\n\n【遵循的模板】：\n${targetFormat}\n\n【角色设定内容】：\n${rawText}`;
@@ -126,47 +126,53 @@ jQuery(async () => {
             toastr.error(`分析失败: ${err.message}`);
         } finally {
             // 恢复按钮状态
-            $('#btn_ai_extract_char').css('opacity', '1').css('pointer-events', 'auto').html('<i class="fa-solid fa-wand-magic-sparkles"></i> AI提取设定');
+            $('#btn_ai_extract_char').css('opacity', '1').css('pointer-events', 'auto').html('<i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 5px;"></i> AI提取');
         }
     };
 
-    // 3. 在下方输入区域动态生成“提取”按钮
-    // 采用挂载到发送行旁边的更稳定的 DOM
+    // 3. 动态寻找UI目标并生成按钮 (加入智能轮询机制)
     const createBottomButton = () => {
-        // 如果按钮已经存在，就不重复创建
         if ($('#btn_ai_extract_char').length > 0) return;
 
-        // 创建一个好看的带有魔法棒图标的按钮
         const extractBtn = $(`
             <div id="btn_ai_extract_char"
                  class="menu_button interactable"
                  title="点击由AI提取当前角色的设定表"
-                 style="display: flex; align-items: center; justify-content: center; margin: 0 5px; padding: 0 10px; border-radius: 5px; cursor: pointer; color: var(--SmartThemeBodyColor);">
-                <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 5px;"></i> AI提取设定
+                 style="display: inline-flex; align-items: center; justify-content: center; margin: 0 5px; padding: 6px 12px; border-radius: 10px; cursor: pointer; color: var(--SmartThemeBodyColor); background: var(--SmartThemeBlurTintColor); white-space: nowrap; font-size: 0.9em;">
+                <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 5px;"></i> AI提取
             </div>
         `);
-
-        // 绑定刚才的核心逻辑，一点就运行
         extractBtn.on('click', executeExtraction);
 
-        // 强行插入到聊天打字框下方的操作栏（酒馆里的快速菜单区域或者加号面板旁边）
-        // 这里提供双重保险：先找聊天栏下面的控制区，找不到就放发送按钮旁边
-        if ($('#chat_input_extensions').length > 0) {
-            $('#chat_input_extensions').append(extractBtn);
+        // 核心查找：找寻魔法棒扩展栏、快捷回复栏或发送面板附近位置
+        if ($('#quick-replies-container').length > 0) {
+            // 这是标准“魔法棒 (Quick Replies)”所在层
+            $('#quick-replies-container').eq(0).prepend(extractBtn);
+            return true;
+        } else if ($('#extension_prompt_roles').length > 0) {
+            $('#extension_prompt_roles').append(extractBtn);
+            return true;
         } else if ($('.chat-tools-container').length > 0) {
-            $('.chat-tools-container').append(extractBtn);
-        } else {
-            // 万能备用方案：塞进选项框区域
-            $('#send_plus_menu').append(extractBtn);
-            // 或者放在聊天输入框外面
-            $('#send_form').append(extractBtn);
+            $('.chat-tools-container').prepend(extractBtn);
+            return true;
+        } else if ($('#send_controls').length > 0) {
+            $('#send_controls').prepend(extractBtn); // 直接放在发送按钮旁边
+            return true;
         }
+        return false;
     };
 
-    // 酒馆加载完成后插入按钮
-    setTimeout(createBottomButton, 1000);
+    // 使用定时器循环检查界面是否加载完毕（每秒检查一次，最多检查10次）
+    let attempts = 0;
+    const tryInject = setInterval(() => {
+        const injected = createBottomButton();
+        if (injected || attempts > 10) {
+            clearInterval(tryInject);
+        }
+        attempts++;
+    }, 1000);
 
-    // 4. 作为补充，仍然保留命令行 `/exportchar` 以防万一
+    // 4. 保底命令行指令
     const exportCharCommand = new SlashCommand('exportchar', executeExtraction, [], '调用 AI 阅读并提取面板信息', true, true);
     SlashCommandParser.addCommandObject(exportCharCommand);
 });
