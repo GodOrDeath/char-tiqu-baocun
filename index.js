@@ -43,21 +43,30 @@ jQuery(async () => {
     }
     extensionSettings = context.extension_settings[extensionName];
 
+    console.log('[AI提取器] 扩展正在加载...', extensionSettings);
+
     // 1. 加载后台API设置界面
     try {
         const htmlUrl = import.meta.url.replace('index.js', 'settings.html');
         const settingsHtml = await $.get(htmlUrl);
         $('#extensions_settings').append(settingsHtml);
+        console.log('[AI提取器] 设置面板已加载');
     } catch (e) {
-        console.error("设置界面HTML加载失败:", e);
+        console.error("[AI提取器] 设置界面HTML加载失败:", e);
     }
 
     const bindSetting = (id, key, isNumber = false) => {
-        $(`#${id}`).val(extensionSettings[key]).on('input', function () {
+        const $element = $(`#${id}`);
+        if ($element.length === 0) {
+            console.warn(`[AI提取器] 找不到设置元素: #${id}`);
+            return;
+        }
+        $element.val(extensionSettings[key]).on('input', function () {
             extensionSettings[key] = isNumber ? Number($(this).val()) : $(this).val();
             saveSettingsDebounced();
         });
     };
+    
     bindSetting('ai_ext_api_url', 'apiUrl');
     bindSetting('ai_ext_api_key', 'apiKey');
     bindSetting('ai_ext_model', 'model');
@@ -68,11 +77,15 @@ jQuery(async () => {
     // 2. 核心提取逻辑
     const executeExtraction = async () => {
         const charId = context.characterId;
+        console.log('[AI提取器] 开始提取，角色ID:', charId);
+        
         if (charId === undefined || !context.characters || !context.characters[charId]) {
+            console.error('[AI提取器] 角色数据不可用:', charId);
             toastr.error('请先进入一个角色的聊天界面！');
             return;
         }
         if (!extensionSettings.apiUrl || !extensionSettings.apiKey) {
+            console.error('[AI提取器] API配置缺失');
             toastr.error('请先在顶部的扩展面板(积木图标)配置 API 密钥！');
             return;
         }
@@ -85,14 +98,17 @@ jQuery(async () => {
             rawText = rawText.substring(0, maxAllowedChars) + "\n\n...(截断)";
         }
 
+        console.log('[AI提取器] 原始文本长度:', rawText.length);
         toastr.info(`正在联系 AI 分析【${char.name}】...`);
 
         // 按钮进入加载状态
         $('#btn_ai_extract_char').css('opacity', '0.5').css('pointer-events', 'none').html('<i class="fa-solid fa-spinner fa-spin"></i> 提取中...');
 
         try {
-            const prompt = `你是一个精准的文本分析助手。请总结下方角色设定，填入对应项，若无该项则填“未提及”。\n\n【遵循的模板】：\n${targetFormat}\n\n【角色设定内容】：\n${rawText}`;
+            const prompt = `你是一个精准的文本分析助手。请总结下方角色设定，填入对应项，若无该项则填"未提及"。\n\n【遵循的模板】：\n${targetFormat}\n\n【原始角色设定】：\n${rawText}`;
 
+            console.log('[AI提取器] 发送请求到:', extensionSettings.apiUrl);
+            
             const response = await fetch(`${extensionSettings.apiUrl.replace(/\/$/, '')}/chat/completions`, {
                 method: 'POST',
                 headers: {
@@ -110,19 +126,23 @@ jQuery(async () => {
                 })
             });
 
+            console.log('[AI提取器] API响应状态:', response.status);
+
             if (!response.ok) {
                 const errData = await response.json();
+                console.error('[AI提取器] API错误:', errData);
                 throw new Error(errData.error?.message || `HTTP ${response.status}`);
             }
 
             const data = await response.json();
             const aiResult = data.choices[0].message.content.trim();
+            console.log('[AI提取器] 提取结果长度:', aiResult.length);
 
             await SlashCommandParser.executeSlashCommands(`/sys ${aiResult.replace(/\n/g, '\\n')}`);
             toastr.success('提取完成！已发送系统消息。');
 
         } catch (err) {
-            console.error('API 报错:', err);
+            console.error('[AI提取器] 完整错误信息:', err);
             toastr.error(`分析失败: ${err.message}`);
         } finally {
             // 恢复按钮状态
@@ -132,47 +152,65 @@ jQuery(async () => {
 
     // 3. 动态寻找UI目标并生成按钮 (加入智能轮询机制)
     const createBottomButton = () => {
-        if ($('#btn_ai_extract_char').length > 0) return;
+        if ($('#btn_ai_extract_char').length > 0) {
+            console.log('[AI提取器] 按钮已存在，跳过');
+            return true;
+        }
 
         const extractBtn = $(`
             <div id="btn_ai_extract_char"
                  class="menu_button interactable"
                  title="点击由AI提取当前角色的设定表"
-                 style="display: inline-flex; align-items: center; justify-content: center; margin: 0 5px; padding: 6px 12px; border-radius: 10px; cursor: pointer; color: var(--SmartThemeBodyColor); background: var(--SmartThemeBlurTintColor); white-space: nowrap; font-size: 0.9em;">
+                 style="display: inline-flex; align-items: center; justify-content: center; margin: 0 5px; padding: 6px 12px; border-radius: 10px; cursor: pointer; color: var(--SmartThemeBodyColor); background-color: var(--SmartThemeQuoteColor); transition: all 0.2s;">
                 <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 5px;"></i> AI提取
             </div>
         `);
         extractBtn.on('click', executeExtraction);
 
         // 核心查找：找寻魔法棒扩展栏、快捷回复栏或发送面板附近位置
+        console.log('[AI提取器] 尝试注入按钮到UI...');
+
         if ($('#quick-replies-container').length > 0) {
-            // 这是标准“魔法棒 (Quick Replies)”所在层
             $('#quick-replies-container').eq(0).prepend(extractBtn);
+            console.log('[AI提取器] ✓ 按钮已注入到 #quick-replies-container');
             return true;
         } else if ($('#extension_prompt_roles').length > 0) {
             $('#extension_prompt_roles').append(extractBtn);
+            console.log('[AI提取器] ✓ 按钮已注入到 #extension_prompt_roles');
             return true;
         } else if ($('.chat-tools-container').length > 0) {
             $('.chat-tools-container').prepend(extractBtn);
+            console.log('[AI提取器] ✓ 按钮已注入到 .chat-tools-container');
             return true;
         } else if ($('#send_controls').length > 0) {
-            $('#send_controls').prepend(extractBtn); // 直接放在发送按钮旁边
+            $('#send_controls').prepend(extractBtn);
+            console.log('[AI提取器] ✓ 按钮已注入到 #send_controls');
+            return true;
+        } else if ($('.control_menu').length > 0) {
+            $('.control_menu').eq(0).append(extractBtn);
+            console.log('[AI提取器] ✓ 按钮已注入到 .control_menu');
             return true;
         }
+        
+        console.warn('[AI提取器] ⚠ 找不到合适的UI容器');
         return false;
     };
 
-    // 使用定时器循环检查界面是否加载完毕（每秒检查一次，最多检查10次）
+    // 使用定时器循环检查界面是否加载完毕��每秒检查一次，最多检查15次）
     let attempts = 0;
     const tryInject = setInterval(() => {
         const injected = createBottomButton();
-        if (injected || attempts > 10) {
+        if (injected || attempts > 15) {
             clearInterval(tryInject);
+            if (!injected && attempts > 15) {
+                console.error('[AI提取器] ✗ 15次尝试后仍未找到UI容器');
+            }
         }
         attempts++;
-    }, 1000);
+    }, 500);
 
     // 4. 保底命令行指令
     const exportCharCommand = new SlashCommand('exportchar', executeExtraction, [], '调用 AI 阅读并提取面板信息', true, true);
     SlashCommandParser.addCommandObject(exportCharCommand);
+    console.log('[AI提取器] 已注册斜杠命令: /exportchar');
 });
