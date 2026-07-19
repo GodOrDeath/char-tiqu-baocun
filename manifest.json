@@ -1,0 +1,8 @@
+{
+    "display_name": "自创角色存入",
+    "name": "auto-char-worldbook",
+    "version": "2.0.0",
+    "author": "你的GitHub用户名",
+    "description": "通过OpenAI API自动分析聊天记录，将新角色存入专属世界书。",
+    "loading_order": 10
+}
