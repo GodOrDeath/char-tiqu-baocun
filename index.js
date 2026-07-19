@@ -37,22 +37,56 @@ const targetFormat = `角色姓名
 [掌握的技术能力]`;
 
 jQuery(async () => {
+    console.log('[AI提取器] 插件初始化开始');
+    
     const context = getContext();
     if (!context.extension_settings[extensionName]) {
         context.extension_settings[extensionName] = { ...defaultSettings };
     }
     extensionSettings = context.extension_settings[extensionName];
 
-    console.log('[AI提取器] 扩展正在加载...', extensionSettings);
+    console.log('[AI提取器] 配置已加载:', extensionSettings);
 
-    // 1. 加载后台API设置界面
+    // 1. 加载设置界面 - 改进的路径解析
     try {
-        const htmlUrl = import.meta.url.replace('index.js', 'settings.html');
-        const settingsHtml = await $.get(htmlUrl);
+        // 使用绝对路径加载 settings.html
+        const settingsHtml = `
+<div class="ai-char-extractor-settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>AI 角色设定提取器 (API 设置)</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+            <label for="ai_ext_api_url">API 地址 (需包含 /v1)</label>
+            <input type="text" id="ai_ext_api_url" class="text_pole" placeholder="https://api.openai.com/v1" />
+
+            <label for="ai_ext_api_key">API 密钥 (API Key)</label>
+            <input type="password" id="ai_ext_api_key" class="text_pole" placeholder="sk-..." />
+
+            <label for="ai_ext_model">模型名称 (Model)</label>
+            <input type="text" id="ai_ext_model" class="text_pole" placeholder="gpt-4o-mini" />
+
+            <hr style="margin: 10px 0; border: 0.5px solid #444;" />
+
+            <label for="ai_ext_temperature">温度 (Temperature)</label>
+            <small style="display:block; opacity: 0.7; margin-bottom: 5px;">数值越低（0.1~0.5）提取越精确，越高越发散。</small>
+            <input type="number" id="ai_ext_temperature" class="text_pole" step="0.1" min="0" max="2" value="0.1" />
+
+            <label for="ai_ext_max_tokens" style="margin-top: 10px;">最大回复长度 (Max Output Tokens)</label>
+            <input type="number" id="ai_ext_max_tokens" class="text_pole" step="100" min="100" max="8192" value="1000" />
+
+            <label for="ai_ext_context_length" style="margin-top: 10px;">上下文截断长度 (估算 Token)</label>
+            <small style="display:block; opacity: 0.7; margin-bottom: 5px;">控制发送给 AI 的原卡片文本量上限，防报错拦截。（按 1 Token ≈ 2个汉字 粗略换算）</small>
+            <input type="number" id="ai_ext_context_length" class="text_pole" step="500" min="500" max="128000" value="4000" />
+        </div>
+    </div>
+</div>`;
+        
         $('#extensions_settings').append(settingsHtml);
-        console.log('[AI提取器] 设置面板已加载');
+        console.log('[AI提取器] 设置面板已内联加载');
     } catch (e) {
-        console.error("[AI提取器] 设置界面HTML加载失败:", e);
+        console.error("[AI提取器] 设置界面加载失败:", e);
     }
 
     const bindSetting = (id, key, isNumber = false) => {
@@ -64,6 +98,7 @@ jQuery(async () => {
         $element.val(extensionSettings[key]).on('input', function () {
             extensionSettings[key] = isNumber ? Number($(this).val()) : $(this).val();
             saveSettingsDebounced();
+            console.log(`[AI提取器] 设置已更新 ${key}:`, extensionSettings[key]);
         });
     };
     
@@ -80,7 +115,7 @@ jQuery(async () => {
         console.log('[AI提取器] 开始提取，角色ID:', charId);
         
         if (charId === undefined || !context.characters || !context.characters[charId]) {
-            console.error('[AI提取器] 角色数据不可用:', charId);
+            console.error('[AI提取器] 角色数据不可用');
             toastr.error('请先进入一个角色的聊天界面！');
             return;
         }
@@ -105,7 +140,7 @@ jQuery(async () => {
         $('#btn_ai_extract_char').css('opacity', '0.5').css('pointer-events', 'none').html('<i class="fa-solid fa-spinner fa-spin"></i> 提取中...');
 
         try {
-            const prompt = `你是一个精准的文本分析助手。请总结下方角色设定，填入对应项，若无该项则填"未提及"。\n\n【遵循的模板】：\n${targetFormat}\n\n【原始角色设定】：\n${rawText}`;
+            const prompt = `你是一个精准的文本分析助手。请��结下方角色设定，填入对应项，若无该项则填"未提及"。\n\n【遵循的模板】：\n${targetFormat}\n\n【原始角色设定】：\n${rawText}`;
 
             console.log('[AI提取器] 发送请求到:', extensionSettings.apiUrl);
             
@@ -136,13 +171,13 @@ jQuery(async () => {
 
             const data = await response.json();
             const aiResult = data.choices[0].message.content.trim();
-            console.log('[AI提取器] 提取结果长度:', aiResult.length);
+            console.log('[AI提取器] 提取成功，结果长度:', aiResult.length);
 
             await SlashCommandParser.executeSlashCommands(`/sys ${aiResult.replace(/\n/g, '\\n')}`);
             toastr.success('提取完成！已发送系统消息。');
 
         } catch (err) {
-            console.error('[AI提取器] 完整错误信息:', err);
+            console.error('[AI提取器] 完整错误:', err);
             toastr.error(`分析失败: ${err.message}`);
         } finally {
             // 恢复按钮状态
@@ -150,10 +185,9 @@ jQuery(async () => {
         }
     };
 
-    // 3. 动态寻找UI目标并生成按钮 (加入智能轮询机制)
+    // 3. 动态寻找UI目标并生成按钮
     const createBottomButton = () => {
         if ($('#btn_ai_extract_char').length > 0) {
-            console.log('[AI提取器] 按钮已存在，跳过');
             return true;
         }
 
@@ -167,50 +201,48 @@ jQuery(async () => {
         `);
         extractBtn.on('click', executeExtraction);
 
-        // 核心查找：找寻魔法棒扩展栏、快捷回复栏或发送面板附近位置
         console.log('[AI提取器] 尝试注入按钮到UI...');
 
-        if ($('#quick-replies-container').length > 0) {
-            $('#quick-replies-container').eq(0).prepend(extractBtn);
-            console.log('[AI提取器] ✓ 按钮已注入到 #quick-replies-container');
-            return true;
-        } else if ($('#extension_prompt_roles').length > 0) {
-            $('#extension_prompt_roles').append(extractBtn);
-            console.log('[AI提取器] ✓ 按钮已注入到 #extension_prompt_roles');
-            return true;
-        } else if ($('.chat-tools-container').length > 0) {
-            $('.chat-tools-container').prepend(extractBtn);
-            console.log('[AI提取器] ✓ 按钮已注入到 .chat-tools-container');
-            return true;
-        } else if ($('#send_controls').length > 0) {
-            $('#send_controls').prepend(extractBtn);
-            console.log('[AI提取器] ✓ 按钮已注入到 #send_controls');
-            return true;
-        } else if ($('.control_menu').length > 0) {
-            $('.control_menu').eq(0).append(extractBtn);
-            console.log('[AI提取器] ✓ 按钮已注入到 .control_menu');
-            return true;
+        // 优先级顺序查找容器
+        const containers = [
+            { selector: '#quick-replies-container', method: 'prepend', name: '#quick-replies-container' },
+            { selector: '#extension_prompt_roles', method: 'append', name: '#extension_prompt_roles' },
+            { selector: '.chat-tools-container', method: 'prepend', name: '.chat-tools-container' },
+            { selector: '#send_controls', method: 'prepend', name: '#send_controls' },
+            { selector: '.control_menu', method: 'append', name: '.control_menu' },
+            { selector: '.bottom_menu_bar', method: 'prepend', name: '.bottom_menu_bar' }
+        ];
+
+        for (const container of containers) {
+            if ($(container.selector).length > 0) {
+                $(container.selector).eq(0)[container.method](extractBtn);
+                console.log(`[AI提取器] ✓ 按钮已注入到 ${container.name}`);
+                return true;
+            }
         }
         
-        console.warn('[AI提取器] ⚠ 找不到合适的UI容器');
+        console.warn('[AI提取器] ⚠ 找不到合适的UI容器，尝试其他方法...');
         return false;
     };
 
-    // 使用定时器循环检查界面是否加载完毕��每秒检查一次，最多检查15次）
+    // 智能轮询注入UI
     let attempts = 0;
+    const maxAttempts = 20;
     const tryInject = setInterval(() => {
         const injected = createBottomButton();
-        if (injected || attempts > 15) {
+        if (injected) {
             clearInterval(tryInject);
-            if (!injected && attempts > 15) {
-                console.error('[AI提取器] ✗ 15次尝试后仍未找到UI容器');
-            }
+            console.log('[AI提取器] ✓ UI注入成功');
+        } else if (attempts >= maxAttempts) {
+            clearInterval(tryInject);
+            console.error(`[AI提取器] ✗ ${maxAttempts}次尝试后仍未找到UI容器`);
         }
         attempts++;
     }, 500);
 
-    // 4. 保底命令行指令
+    // 4. 斜杠命令 (/exportchar)
     const exportCharCommand = new SlashCommand('exportchar', executeExtraction, [], '调用 AI 阅读并提取面板信息', true, true);
     SlashCommandParser.addCommandObject(exportCharCommand);
-    console.log('[AI提取器] 已注册斜杠命令: /exportchar');
+    console.log('[AI提取器] ✓ 已注册斜杠命令: /exportchar');
+    console.log('[AI提取器] 插件初始化完成！');
 });
