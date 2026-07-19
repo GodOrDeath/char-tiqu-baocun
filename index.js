@@ -4,9 +4,7 @@ import { getContext } from '../../../../extensions.js';
 import { saveSettingsDebounced } from '../../../../utils.js';
 
 const extensionName = 'ai-char-extractor';
-const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
 
-// 包含新增参数的默认设置
 const defaultSettings = {
     apiUrl: 'https://api.openai.com/v1',
     apiKey: '',
@@ -45,17 +43,21 @@ jQuery(async () => {
     }
     extensionSettings = context.extension_settings[extensionName];
 
-    const settingsHtml = await $.get(`${extensionFolderPath}/settings.html`);
-    $('#extensions_settings').append(settingsHtml);
+    // 1. 加载后台 API 设置界面 (仍然放在扩展设置中, 避免污染底布空间)
+    try {
+        const htmlUrl = import.meta.url.replace('index.js', 'settings.html');
+        const settingsHtml = await $.get(htmlUrl);
+        $('#extensions_settings').append(settingsHtml);
+    } catch (e) {
+        console.error("设置界面HTML加载失败:", e);
+    }
 
-    // 绑定文本框事件
     const bindSetting = (id, key, isNumber = false) => {
         $(`#${id}`).val(extensionSettings[key]).on('input', function () {
             extensionSettings[key] = isNumber ? Number($(this).val()) : $(this).val();
             saveSettingsDebounced();
         });
     };
-
     bindSetting('ai_ext_api_url', 'apiUrl');
     bindSetting('ai_ext_api_key', 'apiKey');
     bindSetting('ai_ext_model', 'model');
@@ -63,34 +65,33 @@ jQuery(async () => {
     bindSetting('ai_ext_max_tokens', 'maxTokens', true);
     bindSetting('ai_ext_context_length', 'contextTokens', true);
 
-    const exportCharCommand = new SlashCommand('exportchar', async () => {
+    // 2. 核心提取逻辑
+    const executeExtraction = async () => {
         const charId = context.characterId;
-
         if (charId === undefined || !context.characters || !context.characters[charId]) {
             toastr.error('请先进入一个角色的聊天界面！');
             return;
         }
-
         if (!extensionSettings.apiUrl || !extensionSettings.apiKey) {
-            toastr.error('请先在扩展面板配置 API URL 和 API Key！');
+            toastr.error('请先在顶部的扩展面板(积木图标)配置 API 密钥！');
             return;
         }
 
         const char = context.characters[charId];
-        let rawText = `角色名称：${char.name}\n\n描述设定：\n${char.description}\n\n附加性格设定：\n${char.personality}\n\n初始场景：\n${char.scenario}`;
+        let rawText = `角色：${char.name}\n设定：\n${char.description}\n性格：\n${char.personality}\n场景：\n${char.scenario}`;
 
-        // 【上下文长度截断处理】
-        // 粗略换算：1 token 约等于 2 个汉字或字母
         const maxAllowedChars = Math.floor((extensionSettings.contextTokens || 4000) * 2);
         if (rawText.length > maxAllowedChars) {
-            rawText = rawText.substring(0, maxAllowedChars) + "\n\n...(由于上下文长度限制，多余部分已被截断)";
-            toastr.warning(`角色长文本已按照 ${extensionSettings.contextTokens} token 上限截断。`);
+            rawText = rawText.substring(0, maxAllowedChars) + "\n\n...(截断)";
         }
 
-        toastr.info(`正在请求 AI 分析【${char.name}】的设定...`);
+        toastr.info(`正在联系 AI 分析【${char.name}】...`);
+
+        // 将按钮变为 "提取中" 动画状态
+        $('#btn_ai_extract_char').css('opacity', '0.5').css('pointer-events', 'none').html('<i class="fa-solid fa-spinner fa-spin"></i> 正在提取...');
 
         try {
-            const prompt = `你是一个精准的文本分析助手。请总结下方给出的角色设定，严格按照我要求的格式提取信息。如果无某项信息填“未提及”。\n\n【必须遵循的模板】：\n${targetFormat}\n\n【角色设定内容】：\n${rawText}`;
+            const prompt = `你是一个精准的文本分析助手。请总结下方角色设定，填入对应项，若无该项则填“未提及”。\n\n【遵循的模板】：\n${targetFormat}\n\n【角色设定内容】：\n${rawText}`;
 
             const response = await fetch(`${extensionSettings.apiUrl.replace(/\/$/, '')}/chat/completions`, {
                 method: 'POST',
@@ -101,11 +102,11 @@ jQuery(async () => {
                 body: JSON.stringify({
                     model: extensionSettings.model || "gpt-3.5-turbo",
                     messages: [
-                        { role: "system", content: "作为一个 TRPG 角色阅读器，请直接输出纯文本模板内容，禁止包含任何 Markdown 代码块（如 ```）及多余对话语。" },
-                        { role: <q>"user"</q>, content: prompt }
+                        { role: "system", content: "返回内容必须纯文本格式，禁止包含 markdown 代码块和前言后语。" },
+                        { role: "user", content: prompt }
                     ],
-                    temperature: extensionSettings.temperature || 0.1,  // 应用温度设置
-                    max_tokens: extensionSettings.maxTokens || 1000     // 应用最大输出长度
+                    temperature: extensionSettings.temperature,
+                    max_tokens: extensionSettings.maxTokens
                 })
             });
 
@@ -117,16 +118,55 @@ jQuery(async () => {
             const data = await response.json();
             const aiResult = data.choices[0].message.content.trim();
 
-            const safeOutput = aiResult.replace(/\n/g, '\\n');
-            await SlashCommandParser.executeSlashCommands(`/sys ${safeOutput}`);
-            toastr.success('提取完成！已生成系统消息。');
+            await SlashCommandParser.executeSlashCommands(`/sys ${aiResult.replace(/\n/g, '\\n')}`);
+            toastr.success('提取完成！已发送系统消息。');
 
         } catch (err) {
-            console.error('抽取失败:', err);
-            toastr.error(`生成失败: ${err.message}`);
+            console.error('API 报错:', err);
+            toastr.error(`分析失败: ${err.message}`);
+        } finally {
+            // 恢复按钮状态
+            $('#btn_ai_extract_char').css('opacity', '1').css('pointer-events', 'auto').html('<i class="fa-solid fa-wand-magic-sparkles"></i> AI提取设定');
         }
+    };
 
-    }, [], '调用独立的 API 阅读并提取面板信息', true, true);
+    // 3. 在下方输入区域动态生成“提取”按钮
+    // 采用挂载到发送行旁边的更稳定的 DOM
+    const createBottomButton = () => {
+        // 如果按钮已经存在，就不重复创建
+        if ($('#btn_ai_extract_char').length > 0) return;
 
+        // 创建一个好看的带有魔法棒图标的按钮
+        const extractBtn = $(`
+            <div id="btn_ai_extract_char"
+                 class="menu_button interactable"
+                 title="点击由AI提取当前角色的设定表"
+                 style="display: flex; align-items: center; justify-content: center; margin: 0 5px; padding: 0 10px; border-radius: 5px; cursor: pointer; color: var(--SmartThemeBodyColor);">
+                <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 5px;"></i> AI提取设定
+            </div>
+        `);
+
+        // 绑定刚才的核心逻辑，一点就运行
+        extractBtn.on('click', executeExtraction);
+
+        // 强行插入到聊天打字框下方的操作栏（酒馆里的快速菜单区域或者加号面板旁边）
+        // 这里提供双重保险：先找聊天栏下面的控制区，找不到就放发送按钮旁边
+        if ($('#chat_input_extensions').length > 0) {
+            $('#chat_input_extensions').append(extractBtn);
+        } else if ($('.chat-tools-container').length > 0) {
+            $('.chat-tools-container').append(extractBtn);
+        } else {
+            // 万能备用方案：塞进选项框区域
+            $('#send_plus_menu').append(extractBtn);
+            // 或者放在聊天输入框外面
+            $('#send_form').append(extractBtn);
+        }
+    };
+
+    // 酒馆加载完成后插入按钮
+    setTimeout(createBottomButton, 1000);
+
+    // 4. 作为补充，仍然保留命令行 `/exportchar` 以防万一
+    const exportCharCommand = new SlashCommand('exportchar', executeExtraction, [], '调用 AI 阅读并提取面板信息', true, true);
     SlashCommandParser.addCommandObject(exportCharCommand);
 });
