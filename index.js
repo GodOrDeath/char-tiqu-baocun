@@ -1,4 +1,25 @@
-import { eventSource, event_types, worldInfo, saveWorldInfo, chat_metadata, characters, saveCharacter, extension_settings, saveSettingsDebounced } from '../../../../script.js';
+// ============================================================
+// 修正导入：使用 getContext 获取核心 API，其余从 window 补充
+// ============================================================
+import { getContext } from '../../extensions.js';
+
+const context = getContext();
+
+// 优先从 context 获取，如果不存在则从 window 获取（兼容性）
+const eventSource = context.eventSource || window.eventSource;
+const event_types = context.event_types || window.event_types;
+const saveWorldInfo = context.saveWorldInfo || window.saveWorldInfo;
+const saveCharacter = context.saveCharacter || window.saveCharacter;
+const chat_metadata = context.chat_metadata || window.chat_metadata;
+const extension_settings = context.extension_settings || window.extension_settings;
+const saveSettingsDebounced = context.saveSettingsDebounced || window.saveSettingsDebounced;
+const worldInfo = window.worldInfo;        // 通常在 window 上
+const characters = window.characters;      // 通常在 window 上
+
+// ============================================================
+// 以下代码与您原代码完全一致，但已去除所有 window.SillyTavern?.getContext?.()
+// 并改用外部 context 或直接使用上述变量
+// ============================================================
 
 const EXTENSION_NAME = '自创角色存入';
 const TAG_PREFIX = 'auto_dynamic';
@@ -72,7 +93,7 @@ function clearAutoEntriesForChar(charName) {
 }
 
 function safeSetVariable(key, value) {
-    const context = window.SillyTavern?.getContext?.();
+    // 使用外部 context
     if (!context) return;
     if (typeof context.setVariable === 'function') {
         context.setVariable(key, value);
@@ -82,7 +103,6 @@ function safeSetVariable(key, value) {
 }
 
 function safeGetVariable(key) {
-    const context = window.SillyTavern?.getContext?.();
     if (!context) return undefined;
     if (typeof context.getVariable === 'function') {
         return context.getVariable(key);
@@ -93,7 +113,6 @@ function safeGetVariable(key) {
 function rollbackChanges(changes) {
     changes.forEach(change => {
         if (change.oldValue === undefined) {
-            const context = window.SillyTavern?.getContext?.();
             if (context?.deleteVariable) {
                 context.deleteVariable(change.varKey);
             } else {
@@ -108,7 +127,6 @@ function rollbackChanges(changes) {
 
 function ensureStaticEntries(charName) {
     const book = getOrCreateWorldBookForChar(charName);
-    const context = window.SillyTavern?.getContext?.();
 
     const userKey = `${TAG_PREFIX}_USER`;
     if (!book.entries[userKey]) {
@@ -268,9 +286,7 @@ async function analyzeAndProcessMessage(messageId) {
         return;
     }
 
-    const context = window.SillyTavern?.getContext?.();
-    if (!context) return;
-
+    // 使用外部 context
     const msg = context.chat[messageId];
     if (!msg || msg.is_system || msg.is_user) return;
 
@@ -354,8 +370,6 @@ async function bindWorldBookToChar(charName) {
 }
 
 async function onNewMessage(messageId) {
-    const context = window.SillyTavern?.getContext?.();
-    if (!context) return;
     const message = context.chat[messageId];
     if (!message || message.is_system || message.is_user) return;
 
@@ -368,8 +382,6 @@ async function onNewMessage(messageId) {
 }
 
 function onMessageDeleted(messageId) {
-    const context = window.SillyTavern?.getContext?.();
-    if (!context) return;
     const currentUuids = new Set(context.chat.map(msg => msg.uuid));
     for (const uuid in messageChanges) {
         if (!currentUuids.has(uuid)) {
@@ -403,7 +415,9 @@ function onCharLoaded() {
     bindWorldBookToChar(charName);
 }
 
+// ============================================================
 // 事件注册
+// ============================================================
 eventSource.on(event_types.MESSAGE_RECEIVED, onNewMessage);
 eventSource.on(event_types.MESSAGE_SENT, onNewMessage);
 eventSource.on(event_types.MESSAGE_DELETED, onMessageDeleted);
@@ -411,15 +425,17 @@ eventSource.on(event_types.MESSAGE_UPDATED, onMessageUpdated);
 eventSource.on(event_types.NEW_CHAT, onNewChat);
 eventSource.on(event_types.CHARACTER_LOADED, onCharLoaded);
 
+// ============================================================
 // 斜杠命令
-if (window.SillyTavern?.getContext()?.addSlashCommand) {
-    window.SillyTavern.getContext().addSlashCommand('clear-auto-worldbook', () => {
+// ============================================================
+if (context?.addSlashCommand) {
+    context.addSlashCommand('clear-auto-worldbook', () => {
         const charName = getCurrentCharName();
         if (!charName) return 'No character loaded.';
         clearAutoEntriesForChar(charName);
         return `Cleared all dynamic NPC entries for "${charName}".`;
     });
-    window.SillyTavern.getContext().addSlashCommand('delete-auto-worldbook', () => {
+    context.addSlashCommand('delete-auto-worldbook', () => {
         const charName = getCurrentCharName();
         if (!charName) return 'No character loaded.';
         const bookName = `${charName}自创新角色.world.json`;
@@ -431,9 +447,13 @@ if (window.SillyTavern?.getContext()?.addSlashCommand) {
         }
         return `World book "${bookName}" not found.`;
     });
+} else {
+    console.warn('[自创角色存入] addSlashCommand not available');
 }
 
-// ========== 设置面板（API配置） ==========
+// ============================================================
+// 设置面板（API配置） - 使用更稳健的注入方式
+// ============================================================
 function generateSettingsHtml() {
     const settings = getSettings().openai;
     return `
@@ -471,25 +491,33 @@ function generateSettingsHtml() {
 }
 
 function attachSettingsListeners() {
-    $('#auto_char_wb_save').on('click', () => {
-        const settings = getSettings();
-        settings.openai.apiKey = $('#auto_char_wb_api_key').val();
-        settings.openai.baseUrl = $('#auto_char_wb_base_url').val();
-        settings.openai.model = $('#auto_char_wb_model').val();
-        settings.openai.temperature = parseFloat($('#auto_char_wb_temperature').val()) || 0.3;
-        settings.openai.contextMessages = parseInt($('#auto_char_wb_context_msgs').val()) || 2;
-        settings.openai.maxTokens = parseInt($('#auto_char_wb_max_tokens').val()) || 1500;
-        saveSettings();
-        toastr.success('OpenAI 设置已保存');
-    });
+    const saveBtn = document.getElementById('auto_char_wb_save');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', () => {
+            const settings = getSettings();
+            settings.openai.apiKey = document.getElementById('auto_char_wb_api_key').value;
+            settings.openai.baseUrl = document.getElementById('auto_char_wb_base_url').value;
+            settings.openai.model = document.getElementById('auto_char_wb_model').value;
+            settings.openai.temperature = parseFloat(document.getElementById('auto_char_wb_temperature').value) || 0.3;
+            settings.openai.contextMessages = parseInt(document.getElementById('auto_char_wb_context_msgs').value) || 2;
+            settings.openai.maxTokens = parseInt(document.getElementById('auto_char_wb_max_tokens').value) || 1500;
+            saveSettings();
+            if (window.toastr) {
+                window.toastr.success('OpenAI 设置已保存');
+            } else {
+                alert('OpenAI 设置已保存');
+            }
+        });
+    }
 }
 
-// 手动注入设置面板（不再使用 registerExtension）
-jQuery(() => {
-    const container = $('#extensions_settings');
-    if (container.find('.auto-char-worldbook-settings-section').length === 0) {
-        const html = `
-        <div class="auto-char-worldbook-settings-section">
+// 使用 setTimeout 确保 DOM 完全加载后再注入设置面板
+setTimeout(() => {
+    const container = document.getElementById('extensions_settings');
+    if (container && !container.querySelector('.auto-char-worldbook-settings-section')) {
+        const section = document.createElement('div');
+        section.className = 'auto-char-worldbook-settings-section';
+        section.innerHTML = `
             <div class="inline-drawer">
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <b>自创角色存入 · API 配置</b>
@@ -499,9 +527,9 @@ jQuery(() => {
                     ${generateSettingsHtml()}
                 </div>
             </div>
-        </div>
         `;
-        container.append(html);
+        container.appendChild(section);
         attachSettingsListeners();
+        console.log('[自创角色存入] 设置面板已注入');
     }
-});
+}, 1000);
