@@ -6,5 +6,6 @@
     "author": "YourName",
     "main": "index.js",
     "require": ["st-script"],
-    "optional": []
+    "optional": [],
+    "supports": ["st-2.6.0+"]
 }
