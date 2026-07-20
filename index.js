@@ -1,58 +1,60 @@
-// char-tiqu-baocun 扩展 - 稳定版
-console.log("[char-tiqu] 扩展脚本开始执行");
+// ============================================================
+// 角色提取保存 扩展 - 纯 DOM 注入，无任何导入依赖
+// 使用轮询确保菜单加载完成，避免加载失败
+// ============================================================
 
-(function() {
-    "use strict";
+console.log('[角色提取保存] 扩展加载中...');
 
-    // 尝试添加按钮，最多尝试 20 次（10 秒）
+(function () {
+    'use strict';
+
+    // 获取主窗口对象（扩展脚本运行在 iframe 中，需取父级）
+    const win = window.parent || window;
+    const doc = win.document;
+
     let attempts = 0;
-    const maxAttempts = 20;
+    const MAX_ATTEMPTS = 30;
 
-    function tryAddButton() {
+    function injectButton() {
         attempts++;
-        console.log(`[char-tiqu] 尝试添加按钮 (${attempts}/${maxAttempts})`);
+        const menu = doc.getElementById('extensionsMenu');
 
-        try {
-            // 获取魔法棒菜单容器
-            const menu = document.getElementById("extensionsMenu");
-            if (!menu) {
-                console.warn("[char-tiqu] 未找到 extensionsMenu，等待...");
-                if (attempts < maxAttempts) {
-                    setTimeout(tryAddButton, 500);
-                } else {
-                    console.error("[char-tiqu] 超时：无法找到 extensionsMenu");
-                }
-                return;
+        if (!menu) {
+            if (attempts < MAX_ATTEMPTS) {
+                setTimeout(injectButton, 300);
+            } else {
+                console.warn('[角色提取保存] 未找到 extensionsMenu，超时放弃');
             }
-
-            // 检查是否已经添加过，避免重复
-            if (menu.querySelector("[data-ctb]")) {
-                console.log("[char-tiqu] 按钮已存在，跳过");
-                return;
-            }
-
-            // 创建菜单项
-            const item = document.createElement("div");
-            item.className = "list-group-item flex-container flexGap5 interactable";
-            item.style.cursor = "pointer";
-            item.setAttribute("data-ctb", "true"); // 标记，防止重复添加
-            item.innerHTML = `
-                <div class="fa-fw fa-solid fa-save extensionsMenuExtensionButton"></div>
-                <span>角色提取保存</span>
-            `;
-
-            // 点击事件（你可以替换成你需要的功能）
-            item.addEventListener("click", () => {
-                alert("Hello from char-tiqu-baocun!");
-            });
-
-            menu.appendChild(item);
-            console.log("[char-tiqu] ✅ 按钮已成功添加到魔法棒！");
-        } catch (err) {
-            console.error("[char-tiqu] 添加按钮时发生错误:", err);
+            return;
         }
+
+        // 防止重复添加
+        if (menu.querySelector('[data-ctb="true"]')) {
+            return;
+        }
+
+        // 创建菜单项
+        const item = doc.createElement('div');
+        item.className = 'list-group-item flex-container flexGap5 interactable';
+        item.style.cursor = 'pointer';
+        item.setAttribute('data-ctb', 'true');
+
+        // 图标 + 文字
+        item.innerHTML = `
+            <div class="fa-fw fa-solid fa-save extensionsMenuExtensionButton"></div>
+            <span>角色提取保存</span>
+        `;
+
+        // 点击事件（你可以在这里换成你真正的功能）
+        item.addEventListener('click', function (e) {
+            e.stopPropagation();
+            alert('✅ 角色提取保存功能已触发！');
+        });
+
+        menu.appendChild(item);
+        console.log('[角色提取保存] ✅ 按钮已成功注入魔法棒菜单');
     }
 
-    // 开始尝试
-    tryAddButton();
+    // 开始尝试注入
+    injectButton();
 })();
