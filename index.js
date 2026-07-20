@@ -7,9 +7,9 @@ import { getContext } from '../../../extensions.js';
 // ---------- 默认设置 ----------
 const DEFAULT_SETTINGS = {
     apiType: 'custom_openai',
-    apiUrl: '',
+    apiUrl: 'https://gcli.ggchan.dev/v1/chat/completions',
     apiKey: '',
-    model: '', // 尝试一个常见模型
+    model: 'gemini-2.0-flash', // 尝试一个常见模型
     temperature: 0.3,
     contextLength: 2000000,
     maxTokens: 65000,
