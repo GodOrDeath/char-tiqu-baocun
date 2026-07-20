@@ -1,7 +1,6 @@
 // ================================================================
-// 📝 角色提取器 (char-tiqu-baocun)
-// 基于 SillyTavern UI Extensions 官方规范
-// 只依赖 getContext，不使用可能不存在的 eventSource
+// 📝 角色提取器 (char-tiqu-baocun) - 自包含版
+// 所有 UI 内嵌，不依赖外部 HTML 文件
 // ================================================================
 
 import { getContext } from '../../../extensions.js';
@@ -50,21 +49,81 @@ function showToast(message, type = 'info') {
     $toast.data('timer', setTimeout(() => $toast.fadeOut(300), 4000));
 }
 
+// ---------- 获取内置 HTML（内嵌） ----------
+function getSettingsHTML() {
+    return `
+        <div id="ce-settings-container" style="padding:16px 20px; color:#e0e0e0; font-family: 'Segoe UI', system-ui, sans-serif;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:12px;">
+                <h3 style="margin:0; font-size:18px; font-weight:600;">📝 角色提取器</h3>
+                <button id="ce-close-panel" style="background:transparent; border:none; color:#888; font-size:20px; cursor:pointer; padding:0 8px;">✕</button>
+            </div>
+            
+            <!-- 启用开关 -->
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; background:rgba(255,255,255,0.04); padding:10px 14px; border-radius:8px;">
+                <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:14px; user-select:none;">
+                    <span style="font-weight:500;">启用插件</span>
+                    <input type="checkbox" id="ce-enabled" style="width:18px; height:18px; accent-color:#5b7cfa; cursor:pointer;">
+                </label>
+                <span id="ce-status-text" style="font-size:13px; color:#6f8; font-weight:500;">● 已启用</span>
+            </div>
+
+            <!-- API 配置 -->
+            <div style="background:rgba(255,255,255,0.04); padding:12px 14px; border-radius:8px; margin-bottom:12px;">
+                <div style="font-size:13px; font-weight:600; color:#aaa; margin-bottom:10px;">🔌 API 配置</div>
+                <div style="margin-bottom:8px;">
+                    <label style="display:block; font-size:12px; color:#bbb; margin-bottom:3px;">API 地址</label>
+                    <input type="text" id="ce-apiurl" style="width:100%; padding:6px 10px; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); border-radius:6px; color:#e0e0e0; box-sizing:border-box;">
+                </div>
+                <div style="margin-bottom:8px;">
+                    <label style="display:block; font-size:12px; color:#bbb; margin-bottom:3px;">API Key</label>
+                    <input type="password" id="ce-apikey" style="width:100%; padding:6px 10px; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); border-radius:6px; color:#e0e0e0; box-sizing:border-box;">
+                </div>
+                <div>
+                    <label style="display:block; font-size:12px; color:#bbb; margin-bottom:3px;">模型名称</label>
+                    <input type="text" id="ce-model" style="width:100%; padding:6px 10px; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); border-radius:6px; color:#e0e0e0; box-sizing:border-box;">
+                </div>
+            </div>
+
+            <!-- 提取设置 -->
+            <div style="background:rgba(255,255,255,0.04); padding:12px 14px; border-radius:8px; margin-bottom:12px;">
+                <div style="font-size:13px; font-weight:600; color:#aaa; margin-bottom:10px;">⚙️ 提取设置</div>
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+                    <label style="font-size:12px; color:#bbb; min-width:110px;">分析最近消息数</label>
+                    <input type="number" id="ce-maxmessages" min="5" max="100" style="flex:1; padding:6px 10px; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); border-radius:6px; color:#e0e0e0; box-sizing:border-box;">
+                    <span style="font-size:12px; color:#777;">条</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <label style="font-size:12px; color:#bbb; min-width:110px;">AI 温度</label>
+                    <input type="number" id="ce-temperature" min="0" max="1" step="0.05" style="flex:1; padding:6px 10px; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); border-radius:6px; color:#e0e0e0; box-sizing:border-box;">
+                </div>
+            </div>
+
+            <!-- 世界书设置 -->
+            <div style="background:rgba(255,255,255,0.04); padding:12px 14px; border-radius:8px; margin-bottom:14px;">
+                <div style="font-size:13px; font-weight:600; color:#aaa; margin-bottom:10px;">📋 世界书写入设置</div>
+                <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:#ccc; cursor:pointer; margin-bottom:4px;">
+                    <input type="checkbox" id="ce-overwrite" style="accent-color:#5b7cfa;"> 遇到同名角色时覆盖已有条目
+                </label>
+                <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:#ccc; cursor:pointer;">
+                    <input type="checkbox" id="ce-auto-open" checked style="accent-color:#5b7cfa;"> 写入后自动打开世界书面板
+                </label>
+            </div>
+
+            <!-- 操作按钮 -->
+            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <button id="ce-save-btn" style="padding:8px 20px; background:#5b7cfa; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:500;">💾 保存设置</button>
+                <button id="ce-test-btn" style="padding:8px 20px; background:rgba(255,255,255,0.1); color:#ccc; border:none; border-radius:6px; cursor:pointer;">🔍 测试连接</button>
+                <button id="ce-reset-btn" style="padding:8px 20px; background:rgba(255,80,80,0.15); color:#f77; border:none; border-radius:6px; cursor:pointer;">↺ 重置默认</button>
+            </div>
+
+            <!-- Toast 提示 -->
+            <div id="ce-toast" style="margin-top:12px; display:none; padding:8px 12px; border-radius:6px; background:rgba(91,124,250,0.15); border:1px solid rgba(91,124,250,0.25); color:#b8c8ff; font-size:13px;"></div>
+        </div>
+    `;
+}
+
 // ---------- 渲染设置面板 ----------
-async function renderSettings() {
-    const basePath = new URL('.', import.meta.url).href;
-    const htmlUrl = new URL('settings.html', basePath).href;
-
-    let html = '';
-    try {
-        const resp = await fetch(htmlUrl);
-        if (resp.ok) html = await resp.text();
-    } catch (e) { /* fallback */ }
-
-    if (!html) {
-        html = getFallbackSettingsHTML();
-    }
-
+function renderSettings() {
     const containerId = 'ce-ext-container';
     let $container = $(`#${containerId}`);
     if (!$container.length) {
@@ -75,7 +134,7 @@ async function renderSettings() {
         $('body').append($container);
     }
 
-    $container.html(html);
+    $container.html(getSettingsHTML());
     bindUIEvents();
     populateSettings();
     updateStatusDisplay();
@@ -99,7 +158,7 @@ async function renderSettings() {
     });
 }
 
-// ---------- 添加到扩展菜单（魔法棒） ----------
+// ---------- 添加到扩展菜单 ----------
 function addToExtensionsMenu(onClick) {
     const inject = () => {
         const $menu = $('#extensionsMenu .list-group');
@@ -116,7 +175,6 @@ function addToExtensionsMenu(onClick) {
             e.preventDefault();
             e.stopPropagation();
             if (typeof onClick === 'function') onClick();
-            // 尝试关闭下拉
             const $parent = $(this).closest('.dropdown');
             if ($parent.length) $parent.removeClass('open');
         });
@@ -128,7 +186,6 @@ function addToExtensionsMenu(onClick) {
 
     if (inject()) return;
 
-    // 等待菜单出现
     const observer = new MutationObserver(() => {
         if (inject()) observer.disconnect();
     });
@@ -143,7 +200,6 @@ function addToExtensionsMenu(onClick) {
     }, 5000);
 }
 
-// ---------- 浮动按钮备用 ----------
 function addFloatingButton(onClick) {
     if ($('#ce-float-btn').length) return;
     const $btn = $(`
@@ -156,42 +212,6 @@ function addFloatingButton(onClick) {
     `);
     $('body').append($btn);
     $btn.on('click', onClick);
-}
-
-// ---------- 备用 HTML ----------
-function getFallbackSettingsHTML() {
-    return `
-        <div id="ce-settings-container" style="padding:16px 20px; color:#e0e0e0; font-family: sans-serif;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:12px;">
-                <h3 style="margin:0; font-size:18px;">📝 角色提取器</h3>
-                <button id="ce-close-panel" style="background:transparent; border:none; color:#888; font-size:20px; cursor:pointer;">✕</button>
-            </div>
-            <label style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
-                <input type="checkbox" id="ce-enabled"> 启用插件
-            </label>
-            <div style="margin-bottom:10px;">
-                <label style="display:block; font-size:12px; color:#999; margin-bottom:4px;">API 地址</label>
-                <input type="text" id="ce-apiurl" style="width:100%; padding:8px 10px; background:#2a2a3a; border:1px solid #444; border-radius:6px; color:#e0e0e0; box-sizing:border-box;">
-            </div>
-            <div style="margin-bottom:10px;">
-                <label style="display:block; font-size:12px; color:#999; margin-bottom:4px;">API Key</label>
-                <input type="password" id="ce-apikey" style="width:100%; padding:8px 10px; background:#2a2a3a; border:1px solid #444; border-radius:6px; color:#e0e0e0; box-sizing:border-box;">
-            </div>
-            <div style="margin-bottom:10px;">
-                <label style="display:block; font-size:12px; color:#999; margin-bottom:4px;">模型</label>
-                <input type="text" id="ce-model" style="width:100%; padding:8px 10px; background:#2a2a3a; border:1px solid #444; border-radius:6px; color:#e0e0e0; box-sizing:border-box;">
-            </div>
-            <div style="margin-bottom:14px;">
-                <label style="display:block; font-size:12px; color:#999; margin-bottom:4px;">分析最近消息数</label>
-                <input type="number" id="ce-maxmessages" style="width:100%; padding:8px 10px; background:#2a2a3a; border:1px solid #444; border-radius:6px; color:#e0e0e0; box-sizing:border-box;">
-            </div>
-            <div style="display:flex; gap:10px;">
-                <button id="ce-save-btn" style="padding:8px 20px; background:#5b7cfa; color:#fff; border:none; border-radius:6px; cursor:pointer;">💾 保存</button>
-                <button id="ce-test-btn" style="padding:8px 20px; background:rgba(255,255,255,0.1); color:#ccc; border:none; border-radius:6px; cursor:pointer;">🔍 测试</button>
-            </div>
-            <div id="ce-toast" style="margin-top:12px; display:none; padding:10px; border-radius:6px; background:rgba(91,124,250,0.15); border:1px solid rgba(91,124,250,0.25); color:#b8c8ff;"></div>
-        </div>
-    `;
 }
 
 // ---------- UI 事件绑定 ----------
@@ -426,7 +446,7 @@ function writeToWorldbook(characters) {
     }
 }
 
-// ---------- 监听聊天消息（使用 context.on） ----------
+// ---------- 监听聊天 ----------
 function setupListener() {
     if (!context) {
         context = getContext();
@@ -436,7 +456,6 @@ function setupListener() {
         }
     }
 
-    // 使用 context.on 监听消息事件（官方支持的方式）
     context.on('message', async (message) => {
         if (!settings.enabled) return;
         if (!message.isNew || !message.isAi) return;
@@ -468,7 +487,7 @@ function setupListener() {
         }
     });
 
-    console.log('[角色提取器] ✅ 消息监听已启动 (context.on)');
+    console.log('[角色提取器] ✅ 消息监听已启动');
 }
 
 // ---------- 插件入口 ----------
@@ -476,13 +495,13 @@ jQuery(async () => {
     try {
         loadSettings();
         context = getContext();
-        await renderSettings();
+        renderSettings();
         setupListener();
         console.log('[角色提取器] ✅ 插件已加载');
     } catch (e) {
         console.error('[角色提取器] ❌ 加载失败:', e);
-        // 显示一个简单的错误提示
-        $('body').append(`<div style="position:fixed; bottom:10px; right:10px; background:#c0392b; color:#fff; padding:8px 16px; border-radius:4px; z-index:99999; font-size:14px;">⚠️ 角色提取器加载失败，请查看控制台</div>`);
+        // 显示错误提示
+        $('body').append(`<div style="position:fixed; bottom:10px; right:10px; background:#c0392b; color:#fff; padding:8px 16px; border-radius:4px; z-index:99999; font-size:14px;">⚠️ 角色提取器加载失败: ${e.message}</div>`);
         setTimeout(() => $('body').find('div:last').remove(), 10000);
     }
 });
