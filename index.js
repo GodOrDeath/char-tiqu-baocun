@@ -1,12 +1,10 @@
 // ================================================================
 // 📝 角色提取器 (char-tiqu-baocun)
 // 功能：每轮AI回复后自动分析对话，提取角色信息并写入世界书
-// 基于 SillyTavern UI Extensions 规范开发
 // ================================================================
 
 import { getContext } from '../../../extensions.js';
 
-// ---------- 默认设置 ----------
 const DEFAULT_SETTINGS = {
     enabled: true,
     apiUrl: 'https://api.openai.com/v1/chat/completions',
@@ -30,13 +28,13 @@ function loadSettings() {
             const parsed = JSON.parse(stored);
             settings = { ...DEFAULT_SETTINGS, ...parsed };
         }
-    } catch (e) { /* ignore */ }
+    } catch (e) {}
 }
 
 function saveSettings() {
     try {
         localStorage.setItem('ce-settings', JSON.stringify(settings));
-    } catch (e) { /* ignore */ }
+    } catch (e) {}
 }
 
 function showToast(message, type = 'info') {
@@ -50,22 +48,17 @@ function showToast(message, type = 'info') {
     $toast.data('timer', setTimeout(() => $toast.fadeOut(300), 4000));
 }
 
-// ---------- 渲染设置面板 ----------
+// ---------- 设置面板渲染 ----------
 async function renderSettings() {
     const basePath = new URL('.', import.meta.url).href;
     const htmlUrl = new URL('settings.html', basePath).href;
-
     let html = '';
     try {
         const resp = await fetch(htmlUrl);
         if (resp.ok) html = await resp.text();
-    } catch (e) { /* fallback */ }
+    } catch (e) {}
+    if (!html) html = getFallbackSettingsHTML();
 
-    if (!html) {
-        html = getFallbackSettingsHTML();
-    }
-
-    // 创建设置面板容器
     const containerId = 'ce-ext-container';
     let $container = $(`#${containerId}`);
     if (!$container.length) {
@@ -75,13 +68,12 @@ async function renderSettings() {
         `);
         $('body').append($container);
     }
-
     $container.html(html);
     bindUIEvents();
     populateSettings();
     updateStatusDisplay();
 
-    // ---------- 核心修复：将插件添加到魔法棒菜单 ----------
+    // 添加到魔法棒菜单
     addToMagicWandMenu(() => {
         if ($container.is(':visible')) {
             $container.hide();
@@ -92,7 +84,7 @@ async function renderSettings() {
         }
     });
 
-    // 点击面板外部关闭
+    // 点击外部关闭
     $(document).off('click.ce').on('click.ce', function(e) {
         if ($container.is(':visible') &&
             !$(e.target).closest('#ce-ext-container').length &&
@@ -105,111 +97,86 @@ async function renderSettings() {
 }
 
 // ================================================================
-// ⭐ 核心修复：可靠的魔法棒菜单注入
+// ⭐ 修复后的魔法棒菜单注入
 // ================================================================
 function addToMagicWandMenu(onClick) {
-    // 定义注入函数
     const injectMenuItem = () => {
-        // 尝试多种方式找到魔法棒菜单的列表容器
-        // 方式1：通过 #extensionsMenu 查找 .list-group
-        let $menu = $('#extensionsMenu .list-group');
+        // 精确选择魔法棒菜单的列表容器
+        const $menu = $('#extensionsMenu .list-group');
         if (!$menu.length) {
-            // 方式2：通过 #extensionsMenu 查找 .dropdown-menu
-            $menu = $('#extensionsMenu .dropdown-menu');
-        }
-        if (!$menu.length) {
-            // 方式3：直接查找 .extensionsMenu 下的列表
-            $menu = $('.extensionsMenu .list-group');
-        }
-        if (!$menu.length) {
-            // 方式4：查找任何可能包含扩展菜单项的容器
-            $menu = $('.extensionsMenu .dropdown-menu, .extensionsMenu > div');
-        }
-        if (!$menu.length) {
-            // 方式5：最通用的方式 - 查找 id 包含 extensionsMenu 的元素下的列表
-            $menu = $('[id*="extensionsMenu"] .list-group, [id*="extensionsMenu"] .dropdown-menu');
-        }
-
-        // 如果找到菜单容器
-        if ($menu.length) {
-            // 检查是否已添加，避免重复
-            if ($menu.find('.ce-wand-item').length) {
-                return true;
+            // 尝试备选：一些版本可能使用 .dropdown-menu
+            const $alt = $('.extensionsMenu .list-group, #extensionsMenu .dropdown-menu');
+            if ($alt.length) {
+                // 如果找到备选但不确定，返回 false 让外部重试
+                return false;
             }
+            return false;
+        }
 
-            // 创建菜单项，风格与现有项保持一致
-            const $item = $(`
-                <a href="#" class="list-group-item list-group-item-action ce-wand-item" 
-                   data-extension-id="char-tiqu-baocun" 
-                   style="display:flex; align-items:center; gap:10px; padding:6px 14px; color:#e0e0e0; text-decoration:none; cursor:pointer;">
-                    <span style="font-size:16px;">📝</span>
-                    <span>角色提取器</span>
-                </a>
-            `);
-
-            $item.on('click', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                if (typeof onClick === 'function') onClick();
-                // 尝试关闭下拉菜单
-                const $dropdown = $(this).closest('.dropdown-menu, .dropdown');
-                if ($dropdown.length) {
-                    // 有些版本的SillyTavern使用data-toggle
-                    const $btn = $dropdown.siblings('[data-toggle="dropdown"], .dropdown-toggle');
-                    if ($btn.length && $btn.attr('aria-expanded') === 'true') {
-                        $btn.dropdown('toggle');
-                    }
-                }
-            });
-
-            // 将菜单项追加到容器中
-            $menu.append($item);
-            console.log('[角色提取器] ✅ 已添加到魔法棒菜单');
+        // 避免重复添加
+        if ($menu.find('.ce-wand-item').length) {
             return true;
         }
 
-        return false;
+        // 创建菜单项（使用标准类，无自定义内联样式）
+        const $item = $(`
+            <a href="#" class="list-group-item list-group-item-action ce-wand-item" data-extension-id="char-tiqu-baocun">
+                <span>📝 角色提取器</span>
+            </a>
+        `);
+
+        // 点击事件：打开设置面板并关闭下拉菜单
+        $item.on('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (typeof onClick === 'function') onClick();
+
+            // 尝试关闭下拉菜单
+            const $dropdown = $(this).closest('.dropdown, .dropdown-menu');
+            if ($dropdown.length) {
+                const $btn = $dropdown.siblings('.dropdown-toggle, [data-toggle="dropdown"]');
+                if ($btn.length && $btn.attr('aria-expanded') === 'true') {
+                    $btn.dropdown('toggle');
+                }
+            }
+        });
+
+        // 插入到列表顶部（prepend）确保位置正确
+        $menu.prepend($item);
+        console.log('[角色提取器] ✅ 已添加到魔法棒菜单');
+        return true;
     };
 
     // 立即尝试注入
-    if (injectMenuItem()) {
-        return;
-    }
+    if (injectMenuItem()) return;
 
-    // 如果菜单尚未加载，等待并重试
+    // 如果失败，设置重试
     let attempts = 0;
-    const maxAttempts = 20; // 最多尝试10秒 (20 * 500ms)
+    const maxAttempts = 20;
     const interval = setInterval(() => {
         attempts++;
         if (injectMenuItem() || attempts >= maxAttempts) {
             clearInterval(interval);
             if (attempts >= maxAttempts) {
-                console.warn('[角色提取器] ⚠️ 未能找到魔法棒菜单，尝试备用入口');
-                // 备用方案：在界面右上角添加浮动按钮
+                console.warn('[角色提取器] ⚠️ 未找到魔法棒菜单，启用浮动按钮');
                 addFloatingButton(onClick);
             }
         }
     }, 500);
 
-    // 另外，使用 MutationObserver 监听 DOM 变化，以便在菜单动态加载时注入
+    // MutationObserver 监控 DOM 变化
     const observer = new MutationObserver(() => {
         if (injectMenuItem()) {
             observer.disconnect();
         }
     });
     observer.observe(document.body, { childList: true, subtree: true });
-
-    // 5秒后如果还没注入成功，停止观察
-    setTimeout(() => {
-        observer.disconnect();
-    }, 5000);
+    setTimeout(() => observer.disconnect(), 5000);
 }
 
-// ---------- 备用方案：浮动按钮 ----------
+// ---------- 备用浮动按钮 ----------
 function addFloatingButton(onClick) {
-    // 检查是否已存在
     if ($('#ce-float-btn').length) return;
-
     const $btn = $(`
         <button id="ce-float-btn" style="position:fixed; bottom:80px; right:20px; z-index:9999; 
                 background:#5b7cfa; color:#fff; border:none; border-radius:50%; width:48px; height:48px; 
@@ -220,7 +187,7 @@ function addFloatingButton(onClick) {
     `);
     $('body').append($btn);
     $btn.on('click', onClick);
-    console.log('[角色提取器] ✅ 已添加浮动按钮作为备用入口');
+    console.log('[角色提取器] ✅ 已添加浮动按钮');
 }
 
 // ---------- 备用 HTML ----------
@@ -259,7 +226,7 @@ function getFallbackSettingsHTML() {
     `;
 }
 
-// ---------- 绑定 UI 事件 ----------
+// ---------- UI 事件绑定 ----------
 function bindUIEvents() {
     $('#ce-close-panel').off('click').on('click', function() {
         $('#ce-ext-container').hide();
@@ -275,7 +242,6 @@ function bindUIEvents() {
         settings.temperature = parseFloat($('#ce-temperature').val()) || 0.3;
         settings.overwrite = $('#ce-overwrite').prop('checked');
         settings.autoOpen = $('#ce-auto-open').prop('checked');
-
         saveSettings();
         updateStatusDisplay();
         showToast('✅ 设置已保存', 'success');
@@ -285,14 +251,11 @@ function bindUIEvents() {
         const url = $('#ce-apiurl').val().trim();
         const key = $('#ce-apikey').val().trim();
         const model = $('#ce-model').val().trim() || 'gpt-3.5-turbo';
-
         if (!url) {
             showToast('⚠️ 请先填写 API 地址', 'error');
             return;
         }
-
         showToast('⏳ 正在测试连接...', 'info');
-
         try {
             const resp = await fetch(url, {
                 method: 'POST',
@@ -306,7 +269,6 @@ function bindUIEvents() {
                     max_tokens: 5,
                 })
             });
-
             if (resp.ok) {
                 showToast('✅ 连接成功！', 'success');
             } else {
@@ -353,7 +315,7 @@ function updateStatusDisplay() {
     }
 }
 
-// ---------- 调用 API 提取角色 ----------
+// ---------- 提取 API ----------
 async function extractCharacters(conversationText) {
     const systemPrompt = `你是一个专业的角色信息提取助手。从对话中提取所有新出现的角色信息，以JSON数组输出。每个角色对象包含以下字段：
 - name: 角色姓名（必填）
@@ -371,9 +333,7 @@ async function extractCharacters(conversationText) {
 - skills: 特殊技能/能力
 
 如果信息不足，字段值可留空字符串。只输出JSON数组，不要多余文字。`;
-
     const userPrompt = `请从以下对话中提取角色信息：\n\n${conversationText}`;
-
     const requestBody = {
         model: settings.model,
         messages: [
@@ -383,7 +343,6 @@ async function extractCharacters(conversationText) {
         temperature: settings.temperature || 0.3,
         max_tokens: 2000,
     };
-
     try {
         const response = await fetch(settings.apiUrl, {
             method: 'POST',
@@ -393,29 +352,18 @@ async function extractCharacters(conversationText) {
             },
             body: JSON.stringify(requestBody),
         });
-
         if (!response.ok) {
             const errText = await response.text();
             throw new Error(`HTTP ${response.status}: ${errText.slice(0, 200)}`);
         }
-
         const data = await response.json();
         let content = data.choices?.[0]?.message?.content || '';
-
         const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-        if (jsonMatch) {
-            content = jsonMatch[1].trim();
-        }
-
+        if (jsonMatch) content = jsonMatch[1].trim();
         const arrayMatch = content.match(/\[\s*\{[\s\S]*\}\s*\]/);
-        if (arrayMatch) {
-            content = arrayMatch[0];
-        }
-
+        if (arrayMatch) content = arrayMatch[0];
         const characters = JSON.parse(content);
-        if (!Array.isArray(characters)) {
-            throw new Error('返回结果不是数组');
-        }
+        if (!Array.isArray(characters)) throw new Error('返回结果不是数组');
         return characters.filter(c => c.name && c.name.trim());
     } catch (e) {
         console.error('[角色提取器] 提取失败:', e);
@@ -440,21 +388,12 @@ function formatCharacterEntry(character) {
         hobbies = '',
         skills = ''
     } = character;
-
     let entry = `${name.trim()}\n`;
-    entry += `【个人信息】\n\n`;
-    entry += `年龄： ${age || '未知'}\n`;
-    entry += `性别： ${gender || '未知'}\n\n`;
+    entry += `【个人信息】\n\n年龄： ${age || '未知'}\n性别： ${gender || '未知'}\n\n`;
     entry += `【背景故事】\n\n${background || '暂无信息'}\n\n`;
-    entry += `【外形特征】\n\n`;
-    entry += `身高： ${height || '未知'}\n`;
-    entry += `体重： ${weight || '未知'}\n`;
-    entry += `体型描述： ${body_type || '未知'}\n`;
-    if (special_features) {
-        entry += `(可选) 特殊身体特征： ${special_features}\n`;
-    }
-    entry += `相貌特点： ${appearance || '未知'}\n`;
-    entry += `衣着风格： ${clothing || '未知'}\n\n`;
+    entry += `【外形特征】\n\n身高： ${height || '未知'}\n体重： ${weight || '未知'}\n体型描述： ${body_type || '未知'}\n`;
+    if (special_features) entry += `(可选) 特殊身体特征： ${special_features}\n`;
+    entry += `相貌特点： ${appearance || '未知'}\n衣着风格： ${clothing || '未知'}\n\n`;
     entry += `【性格特点】\n\n${personality || '暂无信息'}\n\n`;
     entry += `【兴趣爱好】\n\n${hobbies || '暂无信息'}\n\n`;
     entry += `【特殊技能/能力】\n\n${skills || '暂无信息'}`;
@@ -469,14 +408,11 @@ function writeToWorldbook(characters) {
         showToast('⚠️ 请先打开世界书面板', 'error');
         return;
     }
-
     const entries = wi.entries || [];
     let writtenCount = 0;
-
     characters.forEach(character => {
         const name = character.name?.trim();
         if (!name) return;
-
         let existingIndex = -1;
         for (let i = 0; i < entries.length; i++) {
             if (entries[i].keys && entries[i].keys.includes(name)) {
@@ -484,9 +420,7 @@ function writeToWorldbook(characters) {
                 break;
             }
         }
-
         const formattedText = formatCharacterEntry(character);
-
         if (existingIndex >= 0) {
             if (settings.overwrite) {
                 entries[existingIndex].content = formattedText;
@@ -510,62 +444,49 @@ function writeToWorldbook(characters) {
             writtenCount++;
         }
     });
-
-    if (typeof wi.save === 'function') {
-        wi.save();
-    } else if (typeof wi.saveWorldInfo === 'function') {
-        wi.saveWorldInfo();
-    } else {
-        $(document).trigger('worldInfoUpdated');
-    }
+    if (typeof wi.save === 'function') wi.save();
+    else if (typeof wi.saveWorldInfo === 'function') wi.saveWorldInfo();
+    else $(document).trigger('worldInfoUpdated');
 
     if (writtenCount > 0) {
         showToast(`✅ 已${settings.overwrite ? '更新' : '写入'} ${writtenCount} 个角色到世界书`, 'success');
         if (settings.autoOpen) {
             const $wiBtn = $('#worldInfoButton');
-            if ($wiBtn.length && !$wiBtn.hasClass('active')) {
-                $wiBtn.click();
-            }
+            if ($wiBtn.length && !$wiBtn.hasClass('active')) $wiBtn.click();
         }
     } else {
         showToast('ℹ️ 未发现新角色', 'info');
     }
 }
 
-// ---------- 监听聊天消息 ----------
+// ---------- 监听聊天 ----------
 function setupListener() {
     const context = getContext();
     if (!context) {
         console.error('[角色提取器] ❌ 无法获取 SillyTavern 上下文');
         return;
     }
-
     context.on('message', async (message) => {
         if (!settings.enabled) return;
         if (!message.isNew || !message.isAi) return;
         if (isExtracting) return;
-
         if (!window.world_info) {
             console.warn('[角色提取器] ⚠️ 世界书未加载，跳过提取');
             return;
         }
-
         isExtracting = true;
         try {
             const chat = context.chat;
             if (!chat?.messages) return;
-
             const messages = chat.messages;
             const recent = messages.slice(-settings.maxMessages);
             const conversationText = recent
                 .map(msg => `${msg.name || 'User'}: ${msg.text || ''}`)
                 .join('\n');
-
             if (conversationText.trim().length < 20) {
                 isExtracting = false;
                 return;
             }
-
             const characters = await extractCharacters(conversationText);
             if (characters && characters.length > 0) {
                 writeToWorldbook(characters);
@@ -576,11 +497,10 @@ function setupListener() {
             isExtracting = false;
         }
     });
-
     console.log('[角色提取器] ✅ 消息监听已启动');
 }
 
-// ---------- 插件入口 ----------
+// ---------- 入口 ----------
 jQuery(async () => {
     loadSettings();
     await renderSettings();
