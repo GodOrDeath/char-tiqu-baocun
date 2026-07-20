@@ -1,17 +1,20 @@
 // ================================================================
-// 📝 角色提取器 (char-tiqu-baocun) - UI + 设置面板
-// 功能：点击图标弹出设置面板，配置 OpenAI 格式 API
+// 📝 角色提取器 (char-tiqu-baocun)
+// 功能：可拖动图标 + API 配置面板（参照截图设计）
 // ================================================================
 
 import { getContext } from '../../../extensions.js';
 
 // ---------- 默认设置 ----------
 const DEFAULT_SETTINGS = {
+    apiType: 'custom_openai',
     apiUrl: 'https://api.openai.com/v1/chat/completions',
     apiKey: '',
     model: 'gpt-3.5-turbo',
     temperature: 0.3,
-    maxTokens: 2000,
+    contextLength: 2000000,
+    maxTokens: 65000,
+    stream: false,
 };
 
 let settings = { ...DEFAULT_SETTINGS };
@@ -35,7 +38,26 @@ function saveSettings() {
     } catch (e) { /* ignore */ }
 }
 
-// ---------- 创建 UI 面板 HTML ----------
+// ---------- Toast 提示 ----------
+function showToast(message, type = 'info') {
+    const toast = document.getElementById('ce-toast');
+    if (!toast) return;
+    toast.textContent = message;
+    toast.style.display = 'block';
+    const colors = {
+        success: { bg: 'rgba(100,220,100,0.12)', border: 'rgba(100,220,100,0.2)', text: '#8f8' },
+        error: { bg: 'rgba(255,80,80,0.12)', border: 'rgba(255,80,80,0.2)', text: '#f88' },
+        info: { bg: 'rgba(91,124,250,0.12)', border: 'rgba(91,124,250,0.2)', text: '#b8c8ff' },
+    };
+    const c = colors[type] || colors.info;
+    toast.style.background = c.bg;
+    toast.style.borderColor = c.border;
+    toast.style.color = c.text;
+    clearTimeout(toast._timer);
+    toast._timer = setTimeout(() => { toast.style.display = 'none'; }, 4000);
+}
+
+// ---------- 创建 UI 面板 HTML（按截图设计） ----------
 function getPanelHTML() {
     return `
         <div id="ce-panel" style="
@@ -44,13 +66,13 @@ function getPanelHTML() {
             left: 50%;
             transform: translate(-50%, -50%);
             z-index: 99999;
-            background: #1e1e2a;
+            background: #1a1a2e;
             border-radius: 16px;
-            width: 480px;
-            max-height: 80vh;
+            width: 520px;
+            max-height: 85vh;
             overflow-y: auto;
-            box-shadow: 0 12px 48px rgba(0,0,0,0.8);
-            border: 1px solid rgba(255,255,255,0.08);
+            box-shadow: 0 16px 64px rgba(0,0,0,0.85);
+            border: 1px solid rgba(255,255,255,0.06);
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             color: #e0e0e0;
             padding: 0;
@@ -58,114 +80,132 @@ function getPanelHTML() {
         ">
             <!-- 标题栏 -->
             <div style="
-                padding: 18px 24px 14px 24px;
+                padding: 16px 24px 12px 24px;
                 border-bottom: 1px solid rgba(255,255,255,0.06);
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
             ">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <span style="font-size: 22px;">📝</span>
-                    <span style="font-size: 18px; font-weight: 600;">角色提取器设置</span>
-                </div>
+                <span style="font-size: 17px; font-weight: 600; color: #f0f0f0;">📝 角色提取器</span>
                 <button id="ce-close-panel" style="
                     background: transparent;
                     border: none;
-                    color: #888;
+                    color: #666;
                     font-size: 20px;
                     cursor: pointer;
-                    padding: 4px 8px;
+                    padding: 2px 10px;
                     border-radius: 6px;
-                    transition: background 0.2s;
-                " onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='transparent'">✕</button>
+                    transition: all 0.2s;
+                " onmouseover="this.style.color='#eee'" onmouseout="this.style.color='#666'">✕</button>
             </div>
 
-            <!-- 内容区 -->
+            <!-- 内容 -->
             <div style="padding: 20px 24px 24px 24px;">
-                <!-- API 配置卡片 -->
-                <div style="
-                    background: rgba(255,255,255,0.04);
-                    border-radius: 10px;
-                    padding: 16px 18px;
-                    margin-bottom: 16px;
-                    border: 1px solid rgba(255,255,255,0.06);
-                ">
-                    <div style="font-size: 13px; font-weight: 600; color: #aaa; margin-bottom: 14px; letter-spacing: 0.3px;">
-                        🔌 API 配置
+                <!-- API 类型 -->
+                <div style="margin-bottom: 14px;">
+                    <label style="display: block; font-size: 12px; color: #999; margin-bottom: 4px; font-weight: 500;">API 类型</label>
+                    <div style="
+                        background: rgba(255,255,255,0.05);
+                        border: 1px solid rgba(255,255,255,0.08);
+                        border-radius: 8px;
+                        padding: 8px 14px;
+                        font-size: 14px;
+                        color: #ccc;
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                    ">
+                        <span style="color: #5b7cfa;">●</span> 自定义 OpenAI
                     </div>
+                </div>
 
-                    <!-- API 类型（固定为 OpenAI 格式，显示提示） -->
-                    <div style="margin-bottom: 12px;">
-                        <label style="display: block; font-size: 12px; color: #bbb; margin-bottom: 4px;">API 类型</label>
-                        <div style="
-                            background: rgba(255,255,255,0.05);
-                            border: 1px solid rgba(255,255,255,0.08);
-                            border-radius: 6px;
-                            padding: 8px 12px;
-                            font-size: 13px;
-                            color: #ccc;
-                        ">
-                            ✅ 自定义 OpenAI (兼容)
-                        </div>
-                    </div>
+                <!-- 自定义端点 -->
+                <div style="margin-bottom: 14px;">
+                    <label for="ce-apiurl" style="display: block; font-size: 12px; color: #999; margin-bottom: 4px; font-weight: 500;">自定义端点（基础 URL）</label>
+                    <input type="text" id="ce-apiurl" placeholder="https://api.openai.com/v1/chat/completions" style="
+                        width: 100%;
+                        padding: 10px 14px;
+                        background: rgba(255,255,255,0.06);
+                        border: 1px solid rgba(255,255,255,0.1);
+                        border-radius: 8px;
+                        color: #e0e0e0;
+                        font-size: 13px;
+                        box-sizing: border-box;
+                        transition: border 0.2s, box-shadow 0.2s;
+                    " onfocus="this.style.borderColor='#5b7cfa'; this.style.boxShadow='0 0 0 3px rgba(91,124,250,0.15)'" 
+                     onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.boxShadow='none'">
+                </div>
 
-                    <!-- Base URL -->
-                    <div style="margin-bottom: 12px;">
-                        <label for="ce-apiurl" style="display: block; font-size: 12px; color: #bbb; margin-bottom: 4px;">自定义端点（基础 URL）</label>
-                        <input type="text" id="ce-apiurl" placeholder="https://api.openai.com/v1/chat/completions" style="
-                            width: 100%;
-                            padding: 8px 12px;
-                            background: rgba(255,255,255,0.07);
-                            border: 1px solid rgba(255,255,255,0.12);
-                            border-radius: 6px;
-                            color: #e0e0e0;
-                            font-size: 13px;
-                            box-sizing: border-box;
-                            transition: border 0.2s;
-                        " onfocus="this.style.borderColor='#5b7cfa'" onblur="this.style.borderColor='rgba(255,255,255,0.12)'">
-                    </div>
+                <!-- API Key -->
+                <div style="margin-bottom: 14px;">
+                    <label for="ce-apikey" style="display: block; font-size: 12px; color: #999; margin-bottom: 4px; font-weight: 500;">API Key</label>
+                    <input type="password" id="ce-apikey" placeholder="sk-..." style="
+                        width: 100%;
+                        padding: 10px 14px;
+                        background: rgba(255,255,255,0.06);
+                        border: 1px solid rgba(255,255,255,0.1);
+                        border-radius: 8px;
+                        color: #e0e0e0;
+                        font-size: 13px;
+                        box-sizing: border-box;
+                        transition: border 0.2s, box-shadow 0.2s;
+                    " onfocus="this.style.borderColor='#5b7cfa'; this.style.boxShadow='0 0 0 3px rgba(91,124,250,0.15)'" 
+                     onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.boxShadow='none'">
+                </div>
 
-                    <!-- API Key -->
-                    <div style="margin-bottom: 12px;">
-                        <label for="ce-apikey" style="display: block; font-size: 12px; color: #bbb; margin-bottom: 4px;">API Key</label>
-                        <input type="password" id="ce-apikey" placeholder="sk-..." style="
-                            width: 100%;
-                            padding: 8px 12px;
-                            background: rgba(255,255,255,0.07);
-                            border: 1px solid rgba(255,255,255,0.12);
-                            border-radius: 6px;
-                            color: #e0e0e0;
-                            font-size: 13px;
-                            box-sizing: border-box;
-                            transition: border 0.2s;
-                        " onfocus="this.style.borderColor='#5b7cfa'" onblur="this.style.borderColor='rgba(255,255,255,0.12)'">
-                    </div>
+                <!-- 模型 -->
+                <div style="margin-bottom: 14px;">
+                    <label for="ce-model" style="display: block; font-size: 12px; color: #999; margin-bottom: 4px; font-weight: 500;">选择或输入模型</label>
+                    <input type="text" id="ce-model" placeholder="gpt-3.5-turbo" style="
+                        width: 100%;
+                        padding: 10px 14px;
+                        background: rgba(255,255,255,0.06);
+                        border: 1px solid rgba(255,255,255,0.1);
+                        border-radius: 8px;
+                        color: #e0e0e0;
+                        font-size: 13px;
+                        box-sizing: border-box;
+                        transition: border 0.2s, box-shadow 0.2s;
+                    " onfocus="this.style.borderColor='#5b7cfa'; this.style.boxShadow='0 0 0 3px rgba(91,124,250,0.15)'" 
+                     onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.boxShadow='none'">
+                </div>
 
-                    <!-- 模型 -->
-                    <div style="margin-bottom: 12px;">
-                        <label for="ce-model" style="display: block; font-size: 12px; color: #bbb; margin-bottom: 4px;">选择或输入模型</label>
-                        <input type="text" id="ce-model" placeholder="gpt-3.5-turbo" style="
-                            width: 100%;
-                            padding: 8px 12px;
-                            background: rgba(255,255,255,0.07);
-                            border: 1px solid rgba(255,255,255,0.12);
-                            border-radius: 6px;
-                            color: #e0e0e0;
-                            font-size: 13px;
-                            box-sizing: border-box;
-                            transition: border 0.2s;
-                        " onfocus="this.style.borderColor='#5b7cfa'" onblur="this.style.borderColor='rgba(255,255,255,0.12)'">
-                    </div>
-
-                    <!-- 温度 -->
-                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 6px;">
-                        <label for="ce-temperature" style="font-size: 12px; color: #bbb; min-width: 60px;">温度</label>
+                <!-- 温度 + 上下文 + 最大输出 (一行三列) -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                    <div>
+                        <label for="ce-temperature" style="display: block; font-size: 12px; color: #999; margin-bottom: 4px; font-weight: 500;">温度</label>
                         <input type="number" id="ce-temperature" min="0" max="1" step="0.05" style="
-                            flex: 1;
-                            padding: 8px 12px;
-                            background: rgba(255,255,255,0.07);
-                            border: 1px solid rgba(255,255,255,0.12);
-                            border-radius: 6px;
+                            width: 100%;
+                            padding: 10px 12px;
+                            background: rgba(255,255,255,0.06);
+                            border: 1px solid rgba(255,255,255,0.1);
+                            border-radius: 8px;
+                            color: #e0e0e0;
+                            font-size: 13px;
+                            box-sizing: border-box;
+                        ">
+                    </div>
+                    <div>
+                        <label for="ce-context" style="display: block; font-size: 12px; color: #999; margin-bottom: 4px; font-weight: 500;">上下文</label>
+                        <input type="number" id="ce-context" min="1" step="1000" style="
+                            width: 100%;
+                            padding: 10px 12px;
+                            background: rgba(255,255,255,0.06);
+                            border: 1px solid rgba(255,255,255,0.1);
+                            border-radius: 8px;
+                            color: #e0e0e0;
+                            font-size: 13px;
+                            box-sizing: border-box;
+                        ">
+                    </div>
+                    <div>
+                        <label for="ce-max-tokens" style="display: block; font-size: 12px; color: #999; margin-bottom: 4px; font-weight: 500;">最大输出</label>
+                        <input type="number" id="ce-max-tokens" min="1" step="100" style="
+                            width: 100%;
+                            padding: 10px 12px;
+                            background: rgba(255,255,255,0.06);
+                            border: 1px solid rgba(255,255,255,0.1);
+                            border-radius: 8px;
                             color: #e0e0e0;
                             font-size: 13px;
                             box-sizing: border-box;
@@ -173,86 +213,103 @@ function getPanelHTML() {
                     </div>
                 </div>
 
-                <!-- 操作按钮 -->
-                <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px;">
+                <!-- 流式开关 -->
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px; padding: 6px 0;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: #ccc;">
+                        <input type="checkbox" id="ce-stream" style="
+                            width: 16px;
+                            height: 16px;
+                            accent-color: #5b7cfa;
+                            cursor: pointer;
+                        ">
+                        流式
+                    </label>
+                </div>
+
+                <!-- 按钮组 -->
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 4px;">
+                    <button id="ce-test-btn" style="
+                        padding: 10px 24px;
+                        background: rgba(255,255,255,0.07);
+                        color: #ccc;
+                        border: 1px solid rgba(255,255,255,0.08);
+                        border-radius: 8px;
+                        font-weight: 500;
+                        font-size: 13px;
+                        cursor: pointer;
+                        transition: all 0.2s;
+                        flex: 1;
+                    " onmouseover="this.style.background='rgba(255,255,255,0.14)'" 
+                     onmouseout="this.style.background='rgba(255,255,255,0.07)'">
+                        🔍 测试
+                    </button>
+                    <button id="ce-fetch-models-btn" style="
+                        padding: 10px 24px;
+                        background: rgba(91,124,250,0.15);
+                        color: #8ab;
+                        border: 1px solid rgba(91,124,250,0.15);
+                        border-radius: 8px;
+                        font-weight: 500;
+                        font-size: 13px;
+                        cursor: pointer;
+                        transition: all 0.2s;
+                        flex: 1;
+                    " onmouseover="this.style.background='rgba(91,124,250,0.25)'" 
+                     onmouseout="this.style.background='rgba(91,124,250,0.15)'">
+                        📋 获取模型
+                    </button>
                     <button id="ce-save-btn" style="
-                        padding: 8px 20px;
+                        padding: 10px 24px;
                         background: #5b7cfa;
                         color: #fff;
                         border: none;
-                        border-radius: 6px;
-                        font-weight: 500;
+                        border-radius: 8px;
+                        font-weight: 600;
                         font-size: 13px;
                         cursor: pointer;
-                        transition: background 0.2s;
-                    " onmouseover="this.style.background='#4a6ae0'" onmouseout="this.style.background='#5b7cfa'">
-                        💾 保存设置
-                    </button>
-                    <button id="ce-test-btn" style="
-                        padding: 8px 20px;
-                        background: rgba(255,255,255,0.08);
-                        color: #ccc;
-                        border: 1px solid rgba(255,255,255,0.1);
-                        border-radius: 6px;
-                        font-weight: 500;
-                        font-size: 13px;
-                        cursor: pointer;
-                        transition: background 0.2s;
-                    " onmouseover="this.style.background='rgba(255,255,255,0.15)'" onmouseout="this.style.background='rgba(255,255,255,0.08)'">
-                        🔍 测试连接
-                    </button>
-                    <button id="ce-reset-btn" style="
-                        padding: 8px 20px;
-                        background: rgba(255,80,80,0.12);
-                        color: #f77;
-                        border: none;
-                        border-radius: 6px;
-                        font-weight: 500;
-                        font-size: 13px;
-                        cursor: pointer;
-                        transition: background 0.2s;
-                    " onmouseover="this.style.background='rgba(255,80,80,0.2)'" onmouseout="this.style.background='rgba(255,80,80,0.12)'">
-                        ↺ 重置默认
+                        transition: all 0.2s;
+                        flex: 1;
+                    " onmouseover="this.style.background='#4a6ae0'; transform: translateY(-1px)'" 
+                     onmouseout="this.style.background='#5b7cfa'; transform: none'">
+                        💾 保存
                     </button>
                 </div>
 
-                <!-- Toast 消息 -->
+                <!-- Toast -->
                 <div id="ce-toast" style="
-                    margin-top: 14px;
+                    margin-top: 16px;
                     display: none;
-                    padding: 10px 14px;
-                    border-radius: 6px;
-                    background: rgba(91, 124, 250, 0.12);
-                    border: 1px solid rgba(91, 124, 250, 0.2);
-                    color: #b8c8ff;
+                    padding: 10px 16px;
+                    border-radius: 8px;
                     font-size: 13px;
+                    border: 1px solid transparent;
+                    transition: all 0.3s;
                 "></div>
             </div>
         </div>
     `;
 }
 
-// ---------- 创建 UI 面板 ----------
+// ---------- 创建面板 ----------
 function createPanel() {
     if (document.getElementById('ce-panel')) return;
-    const panelHTML = getPanelHTML();
     const div = document.createElement('div');
-    div.innerHTML = panelHTML;
+    div.innerHTML = getPanelHTML();
     document.body.appendChild(div.firstElementChild);
 
-    // 绑定事件
     const panel = document.getElementById('ce-panel');
     const closeBtn = document.getElementById('ce-close-panel');
     const saveBtn = document.getElementById('ce-save-btn');
     const testBtn = document.getElementById('ce-test-btn');
-    const resetBtn = document.getElementById('ce-reset-btn');
+    const fetchModelsBtn = document.getElementById('ce-fetch-models-btn');
 
+    // 关闭
     closeBtn.addEventListener('click', () => {
         panel.style.display = 'none';
         panelVisible = false;
     });
 
-    // 点击面板外部关闭
+    // 点击外部关闭
     document.addEventListener('mousedown', (e) => {
         if (panelVisible && panel.style.display === 'block') {
             if (!panel.contains(e.target) && e.target.id !== 'ce-draggable-btn') {
@@ -262,12 +319,15 @@ function createPanel() {
         }
     });
 
-    // 保存设置
+    // 保存
     saveBtn.addEventListener('click', () => {
         settings.apiUrl = document.getElementById('ce-apiurl').value.trim() || DEFAULT_SETTINGS.apiUrl;
         settings.apiKey = document.getElementById('ce-apikey').value.trim();
         settings.model = document.getElementById('ce-model').value.trim() || DEFAULT_SETTINGS.model;
         settings.temperature = parseFloat(document.getElementById('ce-temperature').value) || 0.3;
+        settings.contextLength = parseInt(document.getElementById('ce-context').value) || 2000000;
+        settings.maxTokens = parseInt(document.getElementById('ce-max-tokens').value) || 65000;
+        settings.stream = document.getElementById('ce-stream').checked;
         saveSettings();
         showToast('✅ 设置已保存', 'success');
     });
@@ -277,46 +337,109 @@ function createPanel() {
         const url = document.getElementById('ce-apiurl').value.trim();
         const key = document.getElementById('ce-apikey').value.trim();
         const model = document.getElementById('ce-model').value.trim() || 'gpt-3.5-turbo';
+
         if (!url) {
             showToast('⚠️ 请先填写 API 地址', 'error');
             return;
         }
+        if (!key) {
+            showToast('⚠️ 请先填写 API Key', 'error');
+            return;
+        }
+
         showToast('⏳ 测试连接中...', 'info');
         try {
             const resp = await fetch(url, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    ...(key ? { 'Authorization': `Bearer ${key}` } : {}),
+                    'Authorization': `Bearer ${key}`,
                 },
                 body: JSON.stringify({
                     model: model,
-                    messages: [{ role: 'user', content: 'Hello' }],
+                    messages: [{ role: 'user', content: 'Hi' }],
                     max_tokens: 5,
                 })
             });
+
             if (resp.ok) {
-                showToast('✅ 连接成功！', 'success');
+                const data = await resp.json();
+                const modelUsed = data.model || model;
+                showToast(`✅ 连接成功！模型: ${modelUsed}`, 'success');
             } else {
-                const text = await resp.text();
-                showToast(`❌ 连接失败 (${resp.status})`, 'error');
+                let errMsg = `HTTP ${resp.status}`;
+                try {
+                    const errData = await resp.json();
+                    errMsg = errData.error?.message || errData.message || errMsg;
+                } catch (e) { /* ignore */ }
+                showToast(`❌ 连接失败: ${errMsg}`, 'error');
             }
         } catch (e) {
             showToast(`❌ 连接异常: ${e.message}`, 'error');
         }
     });
 
-    // 重置默认
-    resetBtn.addEventListener('click', () => {
-        if (confirm('确定要重置所有设置为默认值吗？')) {
-            settings = { ...DEFAULT_SETTINGS };
-            saveSettings();
-            populateUI();
-            showToast('↺ 已重置为默认设置', 'success');
+    // 获取模型列表
+    fetchModelsBtn.addEventListener('click', async () => {
+        const url = document.getElementById('ce-apiurl').value.trim();
+        const key = document.getElementById('ce-apikey').value.trim();
+
+        if (!url) {
+            showToast('⚠️ 请先填写 API 地址', 'error');
+            return;
+        }
+        if (!key) {
+            showToast('⚠️ 请先填写 API Key', 'error');
+            return;
+        }
+
+        // 从 URL 中提取 base URL (去掉 /chat/completions 后缀)
+        let baseUrl = url.replace(/\/chat\/completions$/, '').replace(/\/+$/, '');
+        if (!baseUrl) baseUrl = url;
+
+        showToast('⏳ 获取模型列表中...', 'info');
+        try {
+            const resp = await fetch(`${baseUrl}/models`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${key}`,
+                },
+            });
+
+            if (resp.ok) {
+                const data = await resp.json();
+                let models = [];
+                if (data.data && Array.isArray(data.data)) {
+                    models = data.data.map(m => m.id || m);
+                } else if (data.models && Array.isArray(data.models)) {
+                    models = data.models.map(m => m.id || m);
+                } else if (Array.isArray(data)) {
+                    models = data.map(m => m.id || m);
+                }
+
+                if (models.length > 0) {
+                    const modelInput = document.getElementById('ce-model');
+                    const suggestions = models.slice(0, 10).join(', ');
+                    modelInput.placeholder = `建议: ${suggestions}`;
+                    modelInput.style.borderColor = '#5b7cfa';
+                    showToast(`✅ 获取到 ${models.length} 个模型，已显示建议`, 'success');
+                } else {
+                    showToast('⚠️ 未获取到模型列表，请手动输入', 'error');
+                }
+            } else {
+                let errMsg = `HTTP ${resp.status}`;
+                try {
+                    const errData = await resp.json();
+                    errMsg = errData.error?.message || errData.message || errMsg;
+                } catch (e) { /* ignore */ }
+                showToast(`❌ 获取失败: ${errMsg}`, 'error');
+            }
+        } catch (e) {
+            showToast(`❌ 获取异常: ${e.message}`, 'error');
         }
     });
 
-    // 填充 UI 当前值
+    // 填充 UI
     populateUI();
 }
 
@@ -325,26 +448,9 @@ function populateUI() {
     document.getElementById('ce-apikey').value = settings.apiKey;
     document.getElementById('ce-model').value = settings.model;
     document.getElementById('ce-temperature').value = settings.temperature;
-}
-
-function showToast(message, type = 'info') {
-    const toast = document.getElementById('ce-toast');
-    if (!toast) return;
-    toast.textContent = message;
-    toast.style.display = 'block';
-    toast.style.background = type === 'success' ? 'rgba(100,220,100,0.12)' :
-                             type === 'error' ? 'rgba(255,80,80,0.12)' :
-                             'rgba(91,124,250,0.12)';
-    toast.style.borderColor = type === 'success' ? 'rgba(100,220,100,0.2)' :
-                              type === 'error' ? 'rgba(255,80,80,0.2)' :
-                              'rgba(91,124,250,0.2)';
-    toast.style.color = type === 'success' ? '#8f8' :
-                        type === 'error' ? '#f88' :
-                        '#b8c8ff';
-    clearTimeout(toast._timer);
-    toast._timer = setTimeout(() => {
-        toast.style.display = 'none';
-    }, 4000);
+    document.getElementById('ce-context').value = settings.contextLength;
+    document.getElementById('ce-max-tokens').value = settings.maxTokens;
+    document.getElementById('ce-stream').checked = settings.stream;
 }
 
 // ---------- 创建可拖动图标 ----------
@@ -379,19 +485,19 @@ function createDraggableButton() {
         userSelect: 'none',
         border: '2px solid rgba(255,255,255,0.3)',
         fontFamily: 'sans-serif',
-        lineHeight: '1'
+        lineHeight: '1',
+        transition: 'transform 0.2s, box-shadow 0.2s',
     });
 
     button.addEventListener('mouseenter', () => {
         button.style.transform = 'scale(1.1)';
-        button.style.boxShadow = '0 6px 20px rgba(91, 124, 250, 0.8)';
+        button.style.boxShadow = '0 6px 24px rgba(91, 124, 250, 0.8)';
     });
     button.addEventListener('mouseleave', () => {
         button.style.transform = 'scale(1)';
         button.style.boxShadow = '0 4px 16px rgba(91, 124, 250, 0.6)';
     });
 
-    // 点击切换面板
     button.addEventListener('click', () => {
         const panel = document.getElementById('ce-panel');
         if (!panel) return;
@@ -401,14 +507,13 @@ function createDraggableButton() {
         } else {
             panel.style.display = 'block';
             panelVisible = true;
-            // 确保面板在视口内
             panel.style.top = '50%';
             panel.style.left = '50%';
             panel.style.transform = 'translate(-50%, -50%)';
         }
     });
 
-    // 拖拽逻辑
+    // 拖拽
     let isDragging = false;
     let startX, startY, origLeft, origTop;
 
@@ -452,7 +557,7 @@ function createDraggableButton() {
     console.log('[角色提取器] ✅ 图标已创建');
 }
 
-// ---------- 插件入口 ----------
+// ---------- 入口 ----------
 jQuery(async () => {
     try {
         console.log('[角色提取器] 加载中...');
