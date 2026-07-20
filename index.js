@@ -1,20 +1,13 @@
 // ================================================================
-// 📝 角色提取器 (char-tiqu-baocun) - 使用 eventSource 监听
-// 兼容 SillyTavern 标准 API，并自带备用方案
+// 📝 角色提取器 (char-tiqu-baocun) - 最终稳定版
+// 使用 window.eventSource 监听消息，无需额外导入
 // ================================================================
 
 import { getContext } from '../../../extensions.js';
 
-// 尝试导入 eventSource 和 event_types（可能因版本不同而失败）
-let eventSource, event_types;
-try {
-    const script = await import('../../../script.js');
-    eventSource = script.eventSource;
-    event_types = script.event_types;
-    console.log('[角色提取器] ✅ 成功导入 eventSource');
-} catch (e) {
-    console.warn('[角色提取器] ⚠️ 无法导入 eventSource，将使用备用监听方案', e);
-}
+// 从全局获取 eventSource（SillyTavern 会暴露）
+const eventSource = window.eventSource;
+const event_types = window.event_types;
 
 // ---------- 默认设置 ----------
 const DEFAULT_SETTINGS = {
@@ -32,6 +25,7 @@ let settings = { ...DEFAULT_SETTINGS };
 let isExtracting = false;
 let context = null;
 let lastMessageCount = 0;
+let isListening = false;
 
 // ---------- 设置管理 ----------
 function loadSettings() {
@@ -461,12 +455,11 @@ async function handleNewMessage() {
     const messages = chat.messages;
     if (messages.length === 0) return;
 
-    // 检查最后一条消息是不是 AI 发的（且是新的）
+    // 最后一条消息必须是 AI 的
     const last = messages[messages.length - 1];
-    if (!last || last.is_user) return; // 如果是用户消息，则跳过（但我们关心AI回复，但事件触发时可能正好是AI回复）
+    if (!last || last.is_user) return;
 
-    // 为了避免重复处理，记录最后处理的消息索引
-    // 简单做法：比较长度变化
+    // 避免重复处理：检查消息数量是否变化
     if (messages.length === lastMessageCount) return;
     lastMessageCount = messages.length;
 
@@ -499,25 +492,24 @@ function setupListener() {
     }
     lastMessageCount = context.chat?.messages?.length || 0;
 
-    // 首选方案：使用 eventSource
+    // 首选：使用 window.eventSource
     if (eventSource && event_types) {
-        console.log('[角色提取器] 📡 使用 eventSource 监听 MESSAGE_RECEIVED');
+        console.log('[角色提取器] 📡 使用 window.eventSource 监听 MESSAGE_RECEIVED');
         eventSource.on(event_types.MESSAGE_RECEIVED, async (index) => {
-            // 当收到新消息（包括用户和AI）时触发
-            // 我们需要判断是不是AI的新消息
+            // 当新消息到达时触发
             if (!settings.enabled) return;
             if (isExtracting) return;
             const chat = context.chat;
             if (!chat?.messages) return;
             const messages = chat.messages;
             if (messages.length === 0) return;
+            // 检查最后一条是否是 AI 的，且消息数量增加了
             const last = messages[messages.length - 1];
-            // 如果最后一条消息是AI发的，且索引大于等于上次处理的数量，则处理
             if (last && !last.is_user && messages.length > lastMessageCount) {
                 lastMessageCount = messages.length;
                 await handleNewMessage();
             } else {
-                // 如果是用户消息，只更新计数，不处理
+                // 如果是用户消息，只更新计数
                 lastMessageCount = messages.length;
             }
         });
@@ -525,8 +517,8 @@ function setupListener() {
         return;
     }
 
-    // 备用方案：轮询检查（每2秒检查一次）
-    console.log('[角色提取器] 📡 使用轮询方案监听新消息（每秒检查）');
+    // 备用方案：轮询
+    console.log('[角色提取器] 📡 eventSource 不可用，使用轮询方案（每2秒）');
     setInterval(() => {
         if (!settings.enabled) return;
         if (isExtracting) return;
@@ -536,8 +528,6 @@ function setupListener() {
         const messages = chat.messages;
         if (messages.length === 0) return;
         if (messages.length <= lastMessageCount) return;
-
-        // 检查最后一条是不是AI的
         const last = messages[messages.length - 1];
         if (last && !last.is_user) {
             lastMessageCount = messages.length;
