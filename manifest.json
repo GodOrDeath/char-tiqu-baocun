@@ -1,8 +1,12 @@
 {
-    "display_name": "📝 角色提取器",
     "name": "char-tiqu-baocun",
+    "displayName": "角色提取保存工具",
     "version": "1.0.0",
-    "author": "你的名字",
-    "description": "从对话中提取角色信息并写入世界书",
-    "js": "index.js"
+    "author": "custom",
+    "description": "复刻 anima-rag 原生UI架构，左下角魔法棒侧边菜单显示，API连接配置功能",
+    "tags": ["角色管理", "API对接", "角色卡"],
+    "entryFile": "index.js",
+    "icon": "",
+    "minSTVersion": "1.12.0",
+    "permissions": ["localStorage", "fetch", "settings"]
 }
