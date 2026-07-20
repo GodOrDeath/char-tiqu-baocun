@@ -1,0 +1,293 @@
+<div id="ce-settings-container" class="ce-settings-panel">
+    <div class="ce-header">
+        <h2><span class="ce-icon">📝</span> 角色提取器设置</h2>
+        <p class="ce-subtitle">自动从对话中提取角色信息，按模板格式写入世界书</p>
+    </div>
+
+    <div class="ce-section">
+        <div class="ce-toggle-row">
+            <label class="ce-toggle-label">
+                <span class="ce-toggle-text">启用插件</span>
+                <input type="checkbox" id="ce-enabled" class="ce-toggle-input">
+                <span class="ce-toggle-slider"></span>
+            </label>
+            <span class="ce-toggle-hint" id="ce-status-text">● 已启用</span>
+        </div>
+    </div>
+
+    <div class="ce-section">
+        <div class="ce-section-title">🔌 API 配置</div>
+        <div class="ce-field">
+            <label for="ce-apiurl">API 地址</label>
+            <input type="text" id="ce-apiurl" placeholder="https://api.openai.com/v1/chat/completions">
+        </div>
+        <div class="ce-field">
+            <label for="ce-apikey">API Key</label>
+            <input type="password" id="ce-apikey" placeholder="sk-...">
+        </div>
+        <div class="ce-field">
+            <label for="ce-model">模型名称</label>
+            <input type="text" id="ce-model" placeholder="gpt-3.5-turbo">
+        </div>
+    </div>
+
+    <div class="ce-section">
+        <div class="ce-section-title">⚙️ 提取设置</div>
+        <div class="ce-field ce-field-inline">
+            <label for="ce-maxmessages">分析最近消息数</label>
+            <input type="number" id="ce-maxmessages" min="5" max="100" value="20">
+            <span class="ce-field-hint">条</span>
+        </div>
+        <div class="ce-field ce-field-inline">
+            <label for="ce-temperature">AI 温度</label>
+            <input type="number" id="ce-temperature" min="0" max="1" step="0.05" value="0.3">
+        </div>
+    </div>
+
+    <div class="ce-section">
+        <div class="ce-section-title">📋 世界书写入设置</div>
+        <div class="ce-field">
+            <label>
+                <input type="checkbox" id="ce-overwrite"> 遇到同名角色时覆盖已有条目
+            </label>
+        </div>
+        <div class="ce-field">
+            <label>
+                <input type="checkbox" id="ce-auto-open" checked> 写入后自动打开世界书面板
+            </label>
+        </div>
+    </div>
+
+    <div class="ce-actions">
+        <button id="ce-save-btn" class="ce-btn ce-btn-primary">💾 保存设置</button>
+        <button id="ce-test-btn" class="ce-btn ce-btn-secondary">🔍 测试连接</button>
+        <button id="ce-reset-btn" class="ce-btn ce-btn-danger">↺ 重置默认</button>
+    </div>
+
+    <div id="ce-toast" class="ce-toast" style="display:none;"></div>
+</div>
+
+<style>
+/* ===== 全局容器 ===== */
+.ce-settings-panel {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    color: #e0e0e0;
+    padding: 16px 20px 24px;
+    max-width: 560px;
+    background: transparent;
+}
+
+/* ===== 头部 ===== */
+.ce-header {
+    margin-bottom: 20px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.ce-header h2 {
+    font-size: 20px;
+    font-weight: 600;
+    margin: 0 0 4px 0;
+    color: #f0f0f0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.ce-icon { font-size: 22px; }
+.ce-subtitle {
+    font-size: 13px;
+    color: #999;
+    margin: 0;
+}
+
+/* ===== 区块 ===== */
+.ce-section {
+    background: rgba(255,255,255,0.04);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+    border: 1px solid rgba(255,255,255,0.06);
+}
+.ce-section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #aaa;
+    margin-bottom: 12px;
+    letter-spacing: 0.3px;
+}
+
+/* ===== 开关 ===== */
+.ce-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.ce-toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    font-size: 14px;
+    user-select: none;
+}
+.ce-toggle-text { font-weight: 500; }
+.ce-toggle-input {
+    display: none;
+}
+.ce-toggle-slider {
+    width: 40px;
+    height: 22px;
+    background: #444;
+    border-radius: 12px;
+    position: relative;
+    transition: background 0.25s;
+    flex-shrink: 0;
+}
+.ce-toggle-slider::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    background: #888;
+    border-radius: 50%;
+    transition: all 0.25s;
+}
+.ce-toggle-input:checked + .ce-toggle-slider {
+    background: #5b7cfa;
+}
+.ce-toggle-input:checked + .ce-toggle-slider::after {
+    left: 20px;
+    background: #fff;
+}
+.ce-toggle-hint {
+    font-size: 13px;
+    color: #6f8;
+    font-weight: 500;
+}
+.ce-toggle-hint.ce-disabled {
+    color: #888;
+}
+
+/* ===== 表单字段 ===== */
+.ce-field {
+    margin-bottom: 10px;
+}
+.ce-field:last-child { margin-bottom: 0; }
+.ce-field label {
+    display: block;
+    font-size: 13px;
+    color: #bbb;
+    margin-bottom: 4px;
+    font-weight: 500;
+}
+.ce-field input[type="text"],
+.ce-field input[type="password"],
+.ce-field input[type="number"] {
+    width: 100%;
+    padding: 8px 12px;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 6px;
+    color: #e8e8e8;
+    font-size: 13px;
+    transition: border 0.2s, box-shadow 0.2s;
+    box-sizing: border-box;
+}
+.ce-field input:focus {
+    outline: none;
+    border-color: #5b7cfa;
+    box-shadow: 0 0 0 3px rgba(91, 124, 250, 0.2);
+}
+.ce-field input[type="checkbox"] {
+    accent-color: #5b7cfa;
+    width: 16px;
+    height: 16px;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+.ce-field-inline {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.ce-field-inline label {
+    flex: 0 0 auto;
+    margin-bottom: 0;
+    min-width: 120px;
+}
+.ce-field-inline input {
+    flex: 1;
+}
+.ce-field-hint {
+    font-size: 12px;
+    color: #777;
+    flex-shrink: 0;
+}
+.ce-field label:has(input[type="checkbox"]) {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    color: #ccc;
+}
+
+/* ===== 按钮 ===== */
+.ce-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+}
+.ce-btn {
+    padding: 8px 18px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.ce-btn-primary {
+    background: #5b7cfa;
+    color: #fff;
+}
+.ce-btn-primary:hover {
+    background: #4a6ae0;
+    transform: translateY(-1px);
+}
+.ce-btn-secondary {
+    background: rgba(255,255,255,0.1);
+    color: #ccc;
+}
+.ce-btn-secondary:hover {
+    background: rgba(255,255,255,0.18);
+}
+.ce-btn-danger {
+    background: rgba(255,80,80,0.15);
+    color: #f77;
+}
+.ce-btn-danger:hover {
+    background: rgba(255,80,80,0.25);
+}
+
+/* ===== Toast 提示 ===== */
+.ce-toast {
+    margin-top: 14px;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    background: rgba(91, 124, 250, 0.15);
+    border: 1px solid rgba(91, 124, 250, 0.25);
+    color: #b8c8ff;
+}
+.ce-toast.ce-toast-success {
+    background: rgba(100, 220, 100, 0.12);
+    border-color: rgba(100, 220, 100, 0.2);
+    color: #8f8;
+}
+.ce-toast.ce-toast-error {
+    background: rgba(255, 80, 80, 0.12);
+    border-color: rgba(255, 80, 80, 0.2);
+    color: #f88;
+}
+</style>
