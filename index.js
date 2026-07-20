@@ -13,7 +13,131 @@ const event_types = window.event_types;
 const DEFAULT_SETTINGS = {
     enabled: true,
     apiUrl: 'https://api.openai.com/v1/chat/completions',
-    apiKey: '',
+    apiKey: '',// ================================================================
+// 📝 角色提取器 (char-tiqu-baocun)
+// 基于 SillyTavern UI Extensions 官方规范
+// ================================================================
+
+// 1. 导入核心 API
+import { getContext } from '../../../extensions.js';
+
+// 2. 插件主入口
+jQuery(async () => {
+    console.log('[角色提取器] 插件正在加载...');
+
+    // 获取 SillyTavern 核心上下文
+    const context = getContext();
+    if (!context) {
+        console.error('[角色提取器] 无法获取 SillyTavern 上下文');
+        return;
+    }
+
+    // 创建一个可拖动的浮动按钮
+    createDraggableButton();
+    
+    console.log('[角色提取器] ✅ 插件加载完成');
+});
+
+// 3. 创建可拖动按钮的函数
+function createDraggableButton() {
+    // 检查按钮是否已存在，避免重复创建
+    if (document.getElementById('ce-draggable-btn')) {
+        return;
+    }
+
+    // 创建按钮元素
+    const button = document.createElement('div');
+    button.id = 'ce-draggable-btn';
+    button.innerHTML = '📝';
+    button.title = '角色提取器';
+    
+    // 设置按钮样式 (使其可拖动并浮动在界面上)
+    Object.assign(button.style, {
+        position: 'fixed',
+        bottom: '100px',
+        right: '20px',
+        width: '48px',
+        height: '48px',
+        borderRadius: '50%',
+        backgroundColor: '#5b7cfa',
+        color: '#fff',
+        fontSize: '24px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+        cursor: 'grab',
+        zIndex: '9999',
+        userSelect: 'none',
+        transition: 'box-shadow 0.2s',
+        border: 'none',
+        fontFamily: 'sans-serif'
+    });
+
+    // 添加悬停效果
+    button.addEventListener('mouseenter', () => {
+        button.style.boxShadow = '0 6px 16px rgba(91, 124, 250, 0.5)';
+    });
+    button.addEventListener('mouseleave', () => {
+        button.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+    });
+
+    // 添加点击事件：显示一个简单的消息
+    button.addEventListener('click', () => {
+        alert('📝 角色提取器已加载！\n\n后续将在这里实现角色提取功能。');
+    });
+
+    // --- 实现拖拽功能 ---
+    let isDragging = false;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    button.addEventListener('mousedown', (e) => {
+        // 只响应左键点击
+        if (e.button !== 0) return;
+        
+        isDragging = true;
+        button.style.cursor = 'grabbing';
+        
+        // 计算鼠标相对于按钮左上角的偏移
+        const rect = button.getBoundingClientRect();
+        offsetX = e.clientX - rect.left;
+        offsetY = e.clientY - rect.top;
+        
+        // 防止文本被选中
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        
+        // 计算新位置，确保按钮不超出视口
+        let newX = e.clientX - offsetX;
+        let newY = e.clientY - offsetY;
+        
+        // 边界限制
+        const maxX = window.innerWidth - button.offsetWidth;
+        const maxY = window.innerHeight - button.offsetHeight;
+        newX = Math.max(0, Math.min(newX, maxX));
+        newY = Math.max(0, Math.min(newY, maxY));
+        
+        button.style.left = newX + 'px';
+        button.style.top = newY + 'px';
+        button.style.right = 'auto';
+        button.style.bottom = 'auto';
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isDragging) {
+            isDragging = false;
+            button.style.cursor = 'grab';
+        }
+    });
+
+    // 将按钮添加到页面
+    document.body.appendChild(button);
+    console.log('[角色提取器] 已创建可拖动按钮');
+}
     model: 'gpt-3.5-turbo',
     maxMessages: 20,
     temperature: 0.3,
