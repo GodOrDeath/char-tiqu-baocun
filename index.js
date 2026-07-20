@@ -1,10 +1,11 @@
 // ================================================================
 // 📝 角色提取器 (char-tiqu-baocun)
 // 功能：可拖动图标 + OpenAI 格式 API 配置面板
-// 通过 /api/proxy 转发请求，解决 CORS
+// 通过 /api/proxy 转发请求，解决 CORS（已修复 403 认证问题）
 // ================================================================
 
-import { getContext } from '../../../extensions.js';
+// 注意：原 import 可能在酒馆的非模块环境下无效，改用全局获取上下文
+// import { getContext } from '../../../extensions.js';
 
 // ---------- 默认设置 ----------
 const DEFAULT_SETTINGS = {
@@ -21,6 +22,21 @@ const DEFAULT_SETTINGS = {
 let settings = { ...DEFAULT_SETTINGS };
 let panelVisible = false;
 let buttonCreated = false;
+
+// ---------- 辅助：获取酒馆上下文中的 CSRF Token ----------
+function getCsrfToken() {
+    try {
+        // 尝试通过酒馆全局对象获取
+        if (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) {
+            const ctx = SillyTavern.getContext();
+            if (ctx.csrfToken) return ctx.csrfToken;
+        }
+    } catch (e) { /* ignore */ }
+    // 备选：从页面 meta 标签获取
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    if (meta) return meta.content;
+    return '';
+}
 
 // ---------- 设置管理 ----------
 function loadSettings() {
@@ -58,7 +74,7 @@ function showToast(message, type = 'info') {
     toast._timer = setTimeout(() => { toast.style.display = 'none'; }, 4000);
 }
 
-// ---------- 代理转发 ----------
+// ---------- 代理转发（修复 403：携带 Cookie 和 CSRF Token）----------
 function getProxyBase() {
     return window.location.origin;
 }
@@ -72,11 +88,27 @@ async function proxyFetch(targetUrl, method, headers, body, isStream = false) {
         body: body, // 对象，代理会 JSON.stringify
         isStream: isStream,
     };
+
+    // 构建向代理的请求头
+    const fetchHeaders = {
+        'Content-Type': 'application/json',
+    };
+
+    // 添加 CSRF Token（如果存在）
+    const csrf = getCsrfToken();
+    if (csrf) {
+        fetchHeaders['X-CSRF-Token'] = csrf;
+        // 某些版本可能用小写
+        fetchHeaders['x-csrf-token'] = csrf;
+    }
+
     const response = await fetch(proxyUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: fetchHeaders,
         body: JSON.stringify(payload),
+        credentials: 'include', // 携带 Cookie，必须！
     });
+
     if (!response.ok) {
         const errText = await response.text();
         throw new Error(`Proxy Error ${response.status}: ${errText}`);
