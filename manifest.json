@@ -1,11 +1,11 @@
 {
-    "display_name": "AI 角色设定提取器",
-    "name": "ai-char-extractor",
-    "description": "使用独立的第三方中转 API (OpenAI格式)，支持温度/Token限制，智能获取角色设定。",
-    "version": "2.1.0",
-    "author": "YourName",
-    "main": "index.js",
-    "require": ["st-script"],
-    "optional": [],
-    "supports": ["st-2.6.0+"]
+  "display_name": "AI 角色设定提取器",
+  "name": "char-tiqu-baocun",
+  "description": "使用AI智能提取角色卡片中的设定信息，自动格式化并保存到系统提示词",
+  "version": "2.0.0",
+  "author": "GodOrDeath",
+  "main": "index.js",
+  "require": ["st-script"],
+  "optional": [],
+  "supports": ["st-2.6.0+"]
 }
