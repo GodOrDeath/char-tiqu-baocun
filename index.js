@@ -1,6 +1,6 @@
 // ============================================================
 // 角色提取保存 扩展 - 通用 OpenAI 格式 API 配置面板
-// 模仿“总结模型”界面，可保存设置、测试连接、获取模型列表
+// 支持通过酒馆后端代理，解决 CORS 跨域问题
 // ============================================================
 
 console.log('[角色提取保存] 扩展加载中...');
@@ -15,7 +15,7 @@ console.log('[角色提取保存] 扩展加载中...');
     const CSS = `
         #ctb-panel {
             position: fixed; left: 0; top: 0; z-index: 30000;
-            width: min(480px, 94vw); max-height: min(85vh, calc(100dvh - 20px));
+            width: min(520px, 94vw); max-height: min(85vh, calc(100dvh - 20px));
             display: flex; flex-direction: column;
             background: var(--SmartThemeBlurTintColor, rgba(24,24,28,0.96));
             color: var(--SmartThemeBodyColor, #ddd);
@@ -63,6 +63,9 @@ console.log('[角色提取保存] 扩展加载中...');
         #ctb-panel .ctb-field .ctb-check-label {
             flex: 0 0 auto; text-align: left; opacity: 0.8;
             font-size: 12px;
+        }
+        #ctb-panel .ctb-field input:disabled {
+            opacity: 0.5; cursor: not-allowed;
         }
         #ctb-panel .ctb-actions {
             display: flex; gap: 8px; margin-top: 4px;
@@ -136,6 +139,11 @@ console.log('[角色提取保存] 扩展加载中...');
                 <input id="ctb-api-key" type="password" placeholder="sk-..." />
             </div>
             <div class="ctb-field">
+                <label>代理模式</label>
+                <input id="ctb-proxy" type="checkbox" checked />
+                <span class="ctb-check-label">使用酒馆后端代理 (绕过CORS)</span>
+            </div>
+            <div class="ctb-field">
                 <label>选择或输入模型</label>
                 <input id="ctb-model" placeholder="gpt-3.5-turbo" list="ctb-model-list" />
                 <datalist id="ctb-model-list"></datalist>
@@ -173,6 +181,7 @@ console.log('[角色提取保存] 扩展加载中...');
     // ---------- DOM 引用 ----------
     const urlInput = doc.getElementById('ctb-api-url');
     const keyInput = doc.getElementById('ctb-api-key');
+    const proxyCheck = doc.getElementById('ctb-proxy');
     const modelInput = doc.getElementById('ctb-model');
     const tempInput = doc.getElementById('ctb-temperature');
     const ctxInput = doc.getElementById('ctb-context');
@@ -200,17 +209,44 @@ console.log('[角色提取保存] 扩展加载中...');
     const saved = loadSettings();
     urlInput.value = saved.url || 'https://gcli.ggchan.dev/v1';
     keyInput.value = saved.key || '';
+    proxyCheck.checked = saved.proxy !== undefined ? saved.proxy : true;
     modelInput.value = saved.model || 'gemini-3.1-pro-preview';
     tempInput.value = saved.temperature ?? 1;
     ctxInput.value = saved.context ?? 2000000;
     maxInput.value = saved.max_tokens ?? 65000;
     streamCheck.checked = saved.stream !== undefined ? saved.stream : true;
 
-    // 自动保存所有字段（除了模型列表）
+    // ---------- 代理模式切换 ----------
+    function updateProxyMode() {
+        const enabled = proxyCheck.checked;
+        if (enabled) {
+            urlInput.disabled = true;
+            keyInput.disabled = true;
+            urlInput.value = '/api/backends/openai/chat/completions';
+            keyInput.value = '';
+            // 清空模型列表
+            modelList.innerHTML = '';
+        } else {
+            urlInput.disabled = false;
+            keyInput.disabled = false;
+            // 恢复之前保存的自定义端点（如果有）
+            const oldUrl = saved.url || 'https://api.openai.com/v1';
+            urlInput.value = oldUrl;
+            const oldKey = saved.key || '';
+            keyInput.value = oldKey;
+        }
+    }
+    proxyCheck.addEventListener('change', () => {
+        updateProxyMode();
+        autoSave();
+    });
+
+    // ---------- 自动保存 ----------
     function autoSave() {
         const settings = {
             url: urlInput.value.trim(),
             key: keyInput.value.trim(),
+            proxy: proxyCheck.checked,
             model: modelInput.value.trim(),
             temperature: parseFloat(tempInput.value) || 1,
             context: parseInt(ctxInput.value) || 2000000,
@@ -224,6 +260,9 @@ console.log('[角色提取保存] 扩展加载中...');
         el.addEventListener('change', autoSave);
         el.addEventListener('input', autoSave);
     });
+
+    // 初始应用代理状态
+    updateProxyMode();
 
     // ---------- 显示状态 ----------
     function setStatus(msg, type = '') {
@@ -242,7 +281,7 @@ console.log('[角色提取保存] 扩展加载中...');
 
     // ---------- API 调用函数 ----------
     async function callOpenAI(messages, options = {}) {
-        const url = urlInput.value.trim();
+        let url = urlInput.value.trim();
         const key = keyInput.value.trim();
         const model = modelInput.value.trim() || 'gpt-3.5-turbo';
         const temperature = parseFloat(tempInput.value) || 1;
@@ -250,12 +289,19 @@ console.log('[角色提取保存] 扩展加载中...');
         const stream = streamCheck.checked;
 
         if (!url) throw new Error('请填写 API 端点地址');
-        if (!key) throw new Error('请填写 API Key');
+        if (!proxyCheck.checked && !key) throw new Error('请填写 API Key');
+
+        // 如果启用代理，强制使用代理路径
+        if (proxyCheck.checked) {
+            url = '/api/backends/openai/chat/completions';
+        }
 
         const headers = {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${key}`
         };
+        if (!proxyCheck.checked) {
+            headers['Authorization'] = `Bearer ${key}`;
+        }
 
         const body = {
             model,
@@ -269,7 +315,8 @@ console.log('[角色提取保存] 扩展加载中...');
         const resp = await fetch(url, {
             method: 'POST',
             headers,
-            body: JSON.stringify(body)
+            body: JSON.stringify(body),
+            credentials: 'same-origin'  // 确保代理请求发送 cookies
         });
 
         if (!resp.ok) {
@@ -278,7 +325,6 @@ console.log('[角色提取保存] 扩展加载中...');
         }
 
         if (stream) {
-            // 简单处理：流式响应，但测试时我们只取第一个块
             const reader = resp.body.getReader();
             const decoder = new TextDecoder();
             let result = '';
@@ -325,15 +371,25 @@ console.log('[角色提取保存] 扩展加载中...');
     async function listModels() {
         const url = urlInput.value.trim();
         const key = keyInput.value.trim();
-        if (!url) { setStatus('⚠️ 请先填写 API 端点', 'error'); return; }
-        if (!key) { setStatus('⚠️ 请先填写 API Key', 'error'); return; }
+        let modelsUrl;
+        if (proxyCheck.checked) {
+            modelsUrl = '/api/backends/openai/models';
+        } else {
+            if (!url) { setStatus('⚠️ 请先填写 API 端点', 'error'); return; }
+            if (!key) { setStatus('⚠️ 请先填写 API Key', 'error'); return; }
+            modelsUrl = url.replace(/\/+$/, '') + '/models';
+        }
 
         setStatus('⏳ 获取模型列表...', '');
         showResponse('');
         try {
-            const modelsUrl = url.replace(/\/+$/, '') + '/models';
+            const headers = {};
+            if (!proxyCheck.checked) {
+                headers['Authorization'] = `Bearer ${key}`;
+            }
             const resp = await fetch(modelsUrl, {
-                headers: { 'Authorization': `Bearer ${key}` }
+                headers,
+                credentials: 'same-origin'
             });
             if (!resp.ok) {
                 const errText = await resp.text();
@@ -345,7 +401,6 @@ console.log('[角色提取保存] 扩展加载中...');
                 setStatus('⚠️ 未获取到模型', 'error');
                 return;
             }
-            // 填充 datalist
             modelList.innerHTML = models.map(m => `<option value="${m}">`).join('');
             setStatus(`✅ 获取到 ${models.length} 个模型`, 'success');
             showResponse(models.join('\n'));
@@ -366,11 +421,9 @@ console.log('[角色提取保存] 扩展加载中...');
     function togglePanel() {
         const hidden = panel.classList.toggle('ctb-hidden');
         if (!hidden) {
-            // 定位到屏幕中间
             const rect = panel.getBoundingClientRect();
             panel.style.left = `${Math.max(8, (win.innerWidth - rect.width) / 2)}px`;
             panel.style.top = `${Math.max(8, (win.innerHeight - rect.height) / 2)}px`;
-            // 恢复状态
             setStatus('就绪', '');
             showResponse('');
         }
@@ -454,5 +507,5 @@ console.log('[角色提取保存] 扩展加载中...');
         panel.style.top = top + 'px';
     });
 
-    console.log('[角色提取保存] 扩展初始化完成 (UI 已更新为总结模型配置)');
+    console.log('[角色提取保存] 扩展初始化完成 (代理模式已支持)');
 })();
