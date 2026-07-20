@@ -1,12 +1,11 @@
 {
-    "name": "char-tiqu-baocun",
-    "displayName": "角色提取保存工具",
-    "version": "1.0.0",
-    "author": "custom",
-    "description": "复刻 anima-rag 原生UI架构，左下角魔法棒侧边菜单显示，API连接配置功能",
-    "tags": ["角色管理", "API对接", "角色卡"],
-    "entryFile": "index.js",
-    "icon": "",
-    "minSTVersion": "1.12.0",
-    "permissions": ["localStorage", "fetch", "settings"]
+  "name": "char-tiqu-baocun",
+  "version": "1.0.0",
+  "description": "提取当前角色卡并保存为JSON文件",
+  "author": "你的名字",
+  "license": "MIT",
+  "main": "index.js",
+  "style": "",
+  "icon": "💾",
+  "repository": "https://github.com/你的用户名/char-tiqu-baocun"
 }
