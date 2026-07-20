@@ -52,7 +52,6 @@ function showToast(message, type = 'info') {
 
 // ---------- 渲染设置面板 ----------
 async function renderSettings() {
-    // 使用 import.meta.url 获取当前脚本所在目录
     const basePath = new URL('.', import.meta.url).href;
     const htmlUrl = new URL('settings.html', basePath).href;
 
@@ -66,29 +65,24 @@ async function renderSettings() {
         html = getFallbackSettingsHTML();
     }
 
-    // 创建设置面板容器（悬浮面板）
+    // 创建设置面板容器
     const containerId = 'ce-ext-container';
     let $container = $(`#${containerId}`);
     if (!$container.length) {
-        $container = $(`<div id="${containerId}" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:9999; background:#1e1e2a; border-radius:12px; width:480px; max-height:80vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.8); border:1px solid rgba(255,255,255,0.1);"></div>`);
+        $container = $(`
+            <div id="${containerId}" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:9999; background:#1e1e2a; border-radius:12px; width:480px; max-height:80vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.8); border:1px solid rgba(255,255,255,0.1);">
+            </div>
+        `);
         $('body').append($container);
     }
 
-    // 注入 HTML
     $container.html(html);
-
-    // 绑定 UI 事件
     bindUIEvents();
-
-    // 填充当前设置值
     populateSettings();
-
-    // 更新状态显示
     updateStatusDisplay();
 
-    // ---------- 在魔法棒菜单中添加条目 ----------
+    // ---------- 核心修复：将插件添加到魔法棒菜单 ----------
     addToMagicWandMenu(() => {
-        // 切换面板显示
         if ($container.is(':visible')) {
             $container.hide();
             settingsPanelVisible = false;
@@ -100,46 +94,54 @@ async function renderSettings() {
 
     // 点击面板外部关闭
     $(document).off('click.ce').on('click.ce', function(e) {
-        if ($container.is(':visible') && !$(e.target).closest('#ce-ext-container').length && !$(e.target).closest('.ce-wand-item').length) {
+        if ($container.is(':visible') &&
+            !$(e.target).closest('#ce-ext-container').length &&
+            !$(e.target).closest('.ce-wand-item').length &&
+            !$(e.target).closest('#extensionsMenuButton').length) {
             $container.hide();
             settingsPanelVisible = false;
         }
     });
 }
 
-// ---------- 添加到魔法棒菜单 ----------
+// ================================================================
+// ⭐ 核心修复：可靠的魔法棒菜单注入
+// ================================================================
 function addToMagicWandMenu(onClick) {
-    // 等待菜单容器加载
-    const checkInterval = setInterval(() => {
-        // 尝试找到魔法棒菜单的容器
-        // 常见选择器: #extensionsMenu .list-group, #extensionsMenu .dropdown-menu, 或 .extensionsMenu
+    // 定义注入函数
+    const injectMenuItem = () => {
+        // 尝试多种方式找到魔法棒菜单的列表容器
+        // 方式1：通过 #extensionsMenu 查找 .list-group
         let $menu = $('#extensionsMenu .list-group');
         if (!$menu.length) {
+            // 方式2：通过 #extensionsMenu 查找 .dropdown-menu
             $menu = $('#extensionsMenu .dropdown-menu');
         }
         if (!$menu.length) {
+            // 方式3：直接查找 .extensionsMenu 下的列表
             $menu = $('.extensionsMenu .list-group');
         }
         if (!$menu.length) {
-            // 如果找不到，尝试通过按钮定位
-            const $wandBtn = $('#extensionsMenuButton, .extensionsMenuButton, [data-i18n="Extensions"]');
-            if ($wandBtn.length) {
-                // 如果按钮存在但菜单未加载，等待
-                return;
-            }
+            // 方式4：查找任何可能包含扩展菜单项的容器
+            $menu = $('.extensionsMenu .dropdown-menu, .extensionsMenu > div');
+        }
+        if (!$menu.length) {
+            // 方式5：最通用的方式 - 查找 id 包含 extensionsMenu 的元素下的列表
+            $menu = $('[id*="extensionsMenu"] .list-group, [id*="extensionsMenu"] .dropdown-menu');
         }
 
+        // 如果找到菜单容器
         if ($menu.length) {
-            clearInterval(checkInterval);
-            
             // 检查是否已添加，避免重复
             if ($menu.find('.ce-wand-item').length) {
-                return;
+                return true;
             }
 
-            // 创建菜单项
+            // 创建菜单项，风格与现有项保持一致
             const $item = $(`
-                <a href="#" class="list-group-item list-group-item-action ce-wand-item" data-extension-id="char-tiqu-baocun" style="display:flex; align-items:center; gap:8px; padding:8px 12px; color:#e0e0e0; text-decoration:none;">
+                <a href="#" class="list-group-item list-group-item-action ce-wand-item" 
+                   data-extension-id="char-tiqu-baocun" 
+                   style="display:flex; align-items:center; gap:10px; padding:6px 14px; color:#e0e0e0; text-decoration:none; cursor:pointer;">
                     <span style="font-size:16px;">📝</span>
                     <span>角色提取器</span>
                 </a>
@@ -149,20 +151,76 @@ function addToMagicWandMenu(onClick) {
                 e.preventDefault();
                 e.stopPropagation();
                 if (typeof onClick === 'function') onClick();
-                // 关闭菜单（如果菜单是下拉式的）
-                const $dropdown = $(this).closest('.dropdown-menu, .list-group');
+                // 尝试关闭下拉菜单
+                const $dropdown = $(this).closest('.dropdown-menu, .dropdown');
                 if ($dropdown.length) {
-                    // 有些菜单点击后不会自动关闭，手动触发
+                    // 有些版本的SillyTavern使用data-toggle
+                    const $btn = $dropdown.siblings('[data-toggle="dropdown"], .dropdown-toggle');
+                    if ($btn.length && $btn.attr('aria-expanded') === 'true') {
+                        $btn.dropdown('toggle');
+                    }
                 }
             });
 
+            // 将菜单项追加到容器中
             $menu.append($item);
             console.log('[角色提取器] ✅ 已添加到魔法棒菜单');
+            return true;
+        }
+
+        return false;
+    };
+
+    // 立即尝试注入
+    if (injectMenuItem()) {
+        return;
+    }
+
+    // 如果菜单尚未加载，等待并重试
+    let attempts = 0;
+    const maxAttempts = 20; // 最多尝试10秒 (20 * 500ms)
+    const interval = setInterval(() => {
+        attempts++;
+        if (injectMenuItem() || attempts >= maxAttempts) {
+            clearInterval(interval);
+            if (attempts >= maxAttempts) {
+                console.warn('[角色提取器] ⚠️ 未能找到魔法棒菜单，尝试备用入口');
+                // 备用方案：在界面右上角添加浮动按钮
+                addFloatingButton(onClick);
+            }
         }
     }, 500);
 
-    // 超时停止检查
-    setTimeout(() => clearInterval(checkInterval), 10000);
+    // 另外，使用 MutationObserver 监听 DOM 变化，以便在菜单动态加载时注入
+    const observer = new MutationObserver(() => {
+        if (injectMenuItem()) {
+            observer.disconnect();
+        }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    // 5秒后如果还没注入成功，停止观察
+    setTimeout(() => {
+        observer.disconnect();
+    }, 5000);
+}
+
+// ---------- 备用方案：浮动按钮 ----------
+function addFloatingButton(onClick) {
+    // 检查是否已存在
+    if ($('#ce-float-btn').length) return;
+
+    const $btn = $(`
+        <button id="ce-float-btn" style="position:fixed; bottom:80px; right:20px; z-index:9999; 
+                background:#5b7cfa; color:#fff; border:none; border-radius:50%; width:48px; height:48px; 
+                font-size:22px; cursor:pointer; box-shadow:0 4px 16px rgba(91,124,250,0.4);
+                display:flex; align-items:center; justify-content:center;">
+            📝
+        </button>
+    `);
+    $('body').append($btn);
+    $btn.on('click', onClick);
+    console.log('[角色提取器] ✅ 已添加浮动按钮作为备用入口');
 }
 
 // ---------- 备用 HTML ----------
@@ -203,13 +261,11 @@ function getFallbackSettingsHTML() {
 
 // ---------- 绑定 UI 事件 ----------
 function bindUIEvents() {
-    // 关闭面板
     $('#ce-close-panel').off('click').on('click', function() {
         $('#ce-ext-container').hide();
         settingsPanelVisible = false;
     });
 
-    // 保存按钮
     $('#ce-save-btn').off('click').on('click', () => {
         settings.enabled = $('#ce-enabled').prop('checked');
         settings.apiUrl = $('#ce-apiurl').val().trim() || DEFAULT_SETTINGS.apiUrl;
@@ -225,7 +281,6 @@ function bindUIEvents() {
         showToast('✅ 设置已保存', 'success');
     });
 
-    // 测试连接按钮
     $('#ce-test-btn').off('click').on('click', async () => {
         const url = $('#ce-apiurl').val().trim();
         const key = $('#ce-apikey').val().trim();
@@ -263,7 +318,6 @@ function bindUIEvents() {
         }
     });
 
-    // 重置按钮
     $('#ce-reset-btn').off('click').on('click', () => {
         if (confirm('确定要重置所有设置为默认值吗？')) {
             settings = { ...DEFAULT_SETTINGS };
@@ -274,13 +328,11 @@ function bindUIEvents() {
         }
     });
 
-    // 启用开关实时更新状态
     $('#ce-enabled').off('change').on('change', function() {
         updateStatusDisplay();
     });
 }
 
-// ---------- 填充设置值 ----------
 function populateSettings() {
     $('#ce-enabled').prop('checked', settings.enabled);
     $('#ce-apiurl').val(settings.apiUrl);
@@ -292,7 +344,6 @@ function populateSettings() {
     $('#ce-auto-open').prop('checked', settings.autoOpen);
 }
 
-// ---------- 更新状态显示 ----------
 function updateStatusDisplay() {
     const $hint = $('#ce-status-text');
     if ($hint.length) {
@@ -351,13 +402,11 @@ async function extractCharacters(conversationText) {
         const data = await response.json();
         let content = data.choices?.[0]?.message?.content || '';
 
-        // 去除 Markdown 代码块
         const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
         if (jsonMatch) {
             content = jsonMatch[1].trim();
         }
 
-        // 尝试提取 JSON 数组
         const arrayMatch = content.match(/\[\s*\{[\s\S]*\}\s*\]/);
         if (arrayMatch) {
             content = arrayMatch[0];
@@ -428,7 +477,6 @@ function writeToWorldbook(characters) {
         const name = character.name?.trim();
         if (!name) return;
 
-        // 查找是否已存在同名条目
         let existingIndex = -1;
         for (let i = 0; i < entries.length; i++) {
             if (entries[i].keys && entries[i].keys.includes(name)) {
@@ -463,7 +511,6 @@ function writeToWorldbook(characters) {
         }
     });
 
-    // 保存世界书
     if (typeof wi.save === 'function') {
         wi.save();
     } else if (typeof wi.saveWorldInfo === 'function') {
@@ -474,8 +521,6 @@ function writeToWorldbook(characters) {
 
     if (writtenCount > 0) {
         showToast(`✅ 已${settings.overwrite ? '更新' : '写入'} ${writtenCount} 个角色到世界书`, 'success');
-
-        // 自动打开世界书面板
         if (settings.autoOpen) {
             const $wiBtn = $('#worldInfoButton');
             if ($wiBtn.length && !$wiBtn.hasClass('active')) {
@@ -495,13 +540,11 @@ function setupListener() {
         return;
     }
 
-    // 监听消息事件
     context.on('message', async (message) => {
         if (!settings.enabled) return;
         if (!message.isNew || !message.isAi) return;
         if (isExtracting) return;
 
-        // 检查是否已有世界书
         if (!window.world_info) {
             console.warn('[角色提取器] ⚠️ 世界书未加载，跳过提取');
             return;
