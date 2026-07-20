@@ -1,12 +1,10 @@
 // ================================================================
 // 📝 角色提取器 (char-tiqu-baocun)
-// 基于 SillyTavern UI Extensions 官方开发规范
-// 文档：https://docs.sillytavern.app/for-contributors/writing-extensions/
+// 基于 SillyTavern UI Extensions 官方规范
+// 只依赖 getContext，不使用可能不存在的 eventSource
 // ================================================================
 
-// 1. 导入官方API（推荐方式）
 import { getContext } from '../../../extensions.js';
-import { eventSource, event_types } from '../../../script.js';
 
 // ---------- 默认设置 ----------
 const DEFAULT_SETTINGS = {
@@ -52,7 +50,7 @@ function showToast(message, type = 'info') {
     $toast.data('timer', setTimeout(() => $toast.fadeOut(300), 4000));
 }
 
-// ---------- 渲染设置面板（注入到DOM） ----------
+// ---------- 渲染设置面板 ----------
 async function renderSettings() {
     const basePath = new URL('.', import.meta.url).href;
     const htmlUrl = new URL('settings.html', basePath).href;
@@ -67,7 +65,6 @@ async function renderSettings() {
         html = getFallbackSettingsHTML();
     }
 
-    // 创建设置面板容器（固定悬浮窗）
     const containerId = 'ce-ext-container';
     let $container = $(`#${containerId}`);
     if (!$container.length) {
@@ -83,8 +80,7 @@ async function renderSettings() {
     populateSettings();
     updateStatusDisplay();
 
-    // ---------- 官方推荐：通过扩展菜单添加入口 ----------
-    // 直接操作 DOM，将菜单项添加到 #extensionsMenu .list-group 的顶部
+    // 添加到扩展菜单
     addToExtensionsMenu(() => {
         if ($container.is(':visible')) {
             $container.hide();
@@ -93,7 +89,7 @@ async function renderSettings() {
         }
     });
 
-    // 点击面板外部关闭
+    // 点击外部关闭
     $(document).off('click.ce').on('click.ce', function(e) {
         if ($container.is(':visible') &&
             !$(e.target).closest('#ce-ext-container').length &&
@@ -103,55 +99,44 @@ async function renderSettings() {
     });
 }
 
-// ---------- 官方推荐：添加到扩展菜单（魔法棒） ----------
+// ---------- 添加到扩展菜单（魔法棒） ----------
 function addToExtensionsMenu(onClick) {
-    // 使用官方推荐的查找方式：等待 #extensionsMenu 下的 .list-group
-    const findMenu = () => {
-        // 官方文档示例中，扩展菜单使用 #extensionsMenu .list-group
+    const inject = () => {
         const $menu = $('#extensionsMenu .list-group');
-        if ($menu.length) {
-            // 检查是否已添加
-            if ($menu.find('.ce-wand-item').length) return true;
+        if (!$menu.length) return false;
+        if ($menu.find('.ce-wand-item').length) return true;
 
-            // 创建菜单项（使用与官方扩展一致的样式）
-            const $item = $(`
-                <a href="#" class="list-group-item list-group-item-action ce-wand-item" data-extension-id="char-tiqu-baocun">
-                    📝 角色提取器
-                </a>
-            `);
+        const $item = $(`
+            <a href="#" class="list-group-item list-group-item-action ce-wand-item" data-extension-id="char-tiqu-baocun">
+                📝 角色提取器
+            </a>
+        `);
 
-            $item.on('click', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                if (typeof onClick === 'function') onClick();
-                // 尝试关闭下拉菜单（如果有）
-                const $parent = $(this).closest('.dropdown');
-                if ($parent.length) {
-                    $parent.removeClass('open');
-                }
-            });
+        $item.on('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (typeof onClick === 'function') onClick();
+            // 尝试关闭下拉
+            const $parent = $(this).closest('.dropdown');
+            if ($parent.length) $parent.removeClass('open');
+        });
 
-            // 插入到顶部
-            $menu.prepend($item);
-            console.log('[角色提取器] ✅ 已添加到扩展菜单');
-            return true;
-        }
-        return false;
+        $menu.prepend($item);
+        console.log('[角色提取器] ✅ 已添加到扩展菜单');
+        return true;
     };
 
-    // 立即尝试
-    if (findMenu()) return;
+    if (inject()) return;
 
-    // 如果菜单还没加载，使用 MutationObserver 监听
+    // 等待菜单出现
     const observer = new MutationObserver(() => {
-        if (findMenu()) observer.disconnect();
+        if (inject()) observer.disconnect();
     });
     observer.observe(document.body, { childList: true, subtree: true });
 
-    // 5秒后停止观察并启用浮动按钮作为备选
     setTimeout(() => {
         observer.disconnect();
-        if (!findMenu()) {
+        if (!inject()) {
             console.warn('[角色提取器] ⚠️ 未找到扩展菜单，启用浮动按钮');
             addFloatingButton(onClick);
         }
@@ -441,7 +426,7 @@ function writeToWorldbook(characters) {
     }
 }
 
-// ---------- 官方推荐：事件监听 ----------
+// ---------- 监听聊天消息（使用 context.on） ----------
 function setupListener() {
     if (!context) {
         context = getContext();
@@ -451,25 +436,19 @@ function setupListener() {
         }
     }
 
-    // 官方推荐使用 eventSource 监听 MESSAGE_RECEIVED 事件
-    eventSource.on(event_types.MESSAGE_RECEIVED, async (messageIndex) => {
+    // 使用 context.on 监听消息事件（官方支持的方式）
+    context.on('message', async (message) => {
         if (!settings.enabled) return;
+        if (!message.isNew || !message.isAi) return;
         if (isExtracting) return;
         if (!window.world_info) {
             console.warn('[角色提取器] ⚠️ 世界书未加载，跳过提取');
             return;
         }
 
-        // 获取最新消息
         const chat = context.chat;
         if (!chat?.messages) return;
-        const messages = chat.messages;
-        // messageIndex 是最后一条消息的索引（可能是AI的回复）
-        const lastMsg = messages[messageIndex];
-        if (!lastMsg || !lastMsg.is_user) return; // 确保是AI回复
-
-        // 提取最近N条消息（包括刚收到的）
-        const recent = messages.slice(-settings.maxMessages);
+        const recent = chat.messages.slice(-settings.maxMessages);
         const conversationText = recent
             .map(msg => `${msg.name || 'User'}: ${msg.text || ''}`)
             .join('\n');
@@ -489,14 +468,21 @@ function setupListener() {
         }
     });
 
-    console.log('[角色提取器] ✅ 消息监听已启动 (使用 eventSource)');
+    console.log('[角色提取器] ✅ 消息监听已启动 (context.on)');
 }
 
 // ---------- 插件入口 ----------
 jQuery(async () => {
-    loadSettings();
-    context = getContext();
-    await renderSettings();
-    setupListener();
-    console.log('[角色提取器] ✅ 插件已加载');
+    try {
+        loadSettings();
+        context = getContext();
+        await renderSettings();
+        setupListener();
+        console.log('[角色提取器] ✅ 插件已加载');
+    } catch (e) {
+        console.error('[角色提取器] ❌ 加载失败:', e);
+        // 显示一个简单的错误提示
+        $('body').append(`<div style="position:fixed; bottom:10px; right:10px; background:#c0392b; color:#fff; padding:8px 16px; border-radius:4px; z-index:99999; font-size:14px;">⚠️ 角色提取器加载失败，请查看控制台</div>`);
+        setTimeout(() => $('body').find('div:last').remove(), 10000);
+    }
 });
