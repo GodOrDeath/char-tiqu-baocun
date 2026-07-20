@@ -2,8 +2,7 @@
     "display_name": "📝 角色提取器",
     "name": "char-tiqu-baocun",
     "version": "1.0.0",
-    "author": "Your Name",
-    "description": "每轮对话后自动提取新角色信息并写入世界书",
-    "js": "index.js",
-    "css": ""
+    "author": "你的名字",
+    "description": "从对话中提取角色信息并写入世界书",
+    "js": "index.js"
 }
