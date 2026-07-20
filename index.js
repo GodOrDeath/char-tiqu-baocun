@@ -1,6 +1,6 @@
 // ================================================================
 // 📝 角色提取器 (char-tiqu-baocun)
-// 功能：可拖动图标 + API 配置面板（参照截图设计）
+// 功能：可拖动图标 + API 配置面板（优化模型选择与连接）
 // ================================================================
 
 import { getContext } from '../../../extensions.js';
@@ -8,9 +8,9 @@ import { getContext } from '../../../extensions.js';
 // ---------- 默认设置 ----------
 const DEFAULT_SETTINGS = {
     apiType: 'custom_openai',
-    apiUrl: 'https://api.openai.com/v1/chat/completions',
+    apiUrl: 'https://gcli.ggchan.dev/v1/chat/completions', // 调整了默认端点
     apiKey: '',
-    model: 'gpt-3.5-turbo',
+    model: 'gemini-3.1-pro-preview', // 使用一个常见的可用模型作为默认
     temperature: 0.3,
     contextLength: 2000000,
     maxTokens: 65000,
@@ -57,7 +57,7 @@ function showToast(message, type = 'info') {
     toast._timer = setTimeout(() => { toast.style.display = 'none'; }, 4000);
 }
 
-// ---------- 创建 UI 面板 HTML（按截图设计） ----------
+// ---------- 创建 UI 面板 HTML ----------
 function getPanelHTML() {
     return `
         <div id="ce-panel" style="
@@ -122,7 +122,7 @@ function getPanelHTML() {
                 <!-- 自定义端点 -->
                 <div style="margin-bottom: 14px;">
                     <label for="ce-apiurl" style="display: block; font-size: 12px; color: #999; margin-bottom: 4px; font-weight: 500;">自定义端点（基础 URL）</label>
-                    <input type="text" id="ce-apiurl" placeholder="https://api.openai.com/v1/chat/completions" style="
+                    <input type="text" id="ce-apiurl" placeholder="https://gcli.ggchan.dev/v1/chat/completions" style="
                         width: 100%;
                         padding: 10px 14px;
                         background: rgba(255,255,255,0.06);
@@ -153,10 +153,24 @@ function getPanelHTML() {
                      onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.boxShadow='none'">
                 </div>
 
-                <!-- 模型 -->
+                <!-- 模型下拉菜单 + 刷新按钮 -->
                 <div style="margin-bottom: 14px;">
-                    <label for="ce-model" style="display: block; font-size: 12px; color: #999; margin-bottom: 4px; font-weight: 500;">选择或输入模型</label>
-                    <input type="text" id="ce-model" placeholder="gpt-3.5-turbo" style="
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                        <label for="ce-model" style="font-size: 12px; color: #999; font-weight: 500;">选择或输入模型</label>
+                        <button id="ce-fetch-models-btn" style="
+                            background: transparent;
+                            border: none;
+                            color: #5b7cfa;
+                            cursor: pointer;
+                            font-size: 12px;
+                            padding: 2px 8px;
+                            border-radius: 4px;
+                        " onmouseover="this.style.background='rgba(91,124,250,0.1)'" 
+                         onmouseout="this.style.background='transparent'">
+                            🔄 刷新列表
+                        </button>
+                    </div>
+                    <select id="ce-model" style="
                         width: 100%;
                         padding: 10px 14px;
                         background: rgba(255,255,255,0.06);
@@ -165,9 +179,11 @@ function getPanelHTML() {
                         color: #e0e0e0;
                         font-size: 13px;
                         box-sizing: border-box;
-                        transition: border 0.2s, box-shadow 0.2s;
-                    " onfocus="this.style.borderColor='#5b7cfa'; this.style.boxShadow='0 0 0 3px rgba(91,124,250,0.15)'" 
-                     onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.boxShadow='none'">
+                        appearance: auto;
+                        cursor: pointer;
+                    ">
+                        <option value="">加载模型中...</option>
+                    </select>
                 </div>
 
                 <!-- 温度 + 上下文 + 最大输出 (一行三列) -->
@@ -243,21 +259,6 @@ function getPanelHTML() {
                      onmouseout="this.style.background='rgba(255,255,255,0.07)'">
                         🔍 测试
                     </button>
-                    <button id="ce-fetch-models-btn" style="
-                        padding: 10px 24px;
-                        background: rgba(91,124,250,0.15);
-                        color: #8ab;
-                        border: 1px solid rgba(91,124,250,0.15);
-                        border-radius: 8px;
-                        font-weight: 500;
-                        font-size: 13px;
-                        cursor: pointer;
-                        transition: all 0.2s;
-                        flex: 1;
-                    " onmouseover="this.style.background='rgba(91,124,250,0.25)'" 
-                     onmouseout="this.style.background='rgba(91,124,250,0.15)'">
-                        📋 获取模型
-                    </button>
                     <button id="ce-save-btn" style="
                         padding: 10px 24px;
                         background: #5b7cfa;
@@ -321,9 +322,10 @@ function createPanel() {
 
     // 保存
     saveBtn.addEventListener('click', () => {
+        const modelSelect = document.getElementById('ce-model');
         settings.apiUrl = document.getElementById('ce-apiurl').value.trim() || DEFAULT_SETTINGS.apiUrl;
         settings.apiKey = document.getElementById('ce-apikey').value.trim();
-        settings.model = document.getElementById('ce-model').value.trim() || DEFAULT_SETTINGS.model;
+        settings.model = modelSelect.value || modelSelect.options[0]?.value || DEFAULT_SETTINGS.model;
         settings.temperature = parseFloat(document.getElementById('ce-temperature').value) || 0.3;
         settings.contextLength = parseInt(document.getElementById('ce-context').value) || 2000000;
         settings.maxTokens = parseInt(document.getElementById('ce-max-tokens').value) || 65000;
@@ -336,7 +338,8 @@ function createPanel() {
     testBtn.addEventListener('click', async () => {
         const url = document.getElementById('ce-apiurl').value.trim();
         const key = document.getElementById('ce-apikey').value.trim();
-        const model = document.getElementById('ce-model').value.trim() || 'gpt-3.5-turbo';
+        const modelSelect = document.getElementById('ce-model');
+        const model = modelSelect.value || modelSelect.options[0]?.value || 'gemini-3.1-pro-preview';
 
         if (!url) {
             showToast('⚠️ 请先填写 API 地址', 'error');
@@ -379,10 +382,11 @@ function createPanel() {
         }
     });
 
-    // 获取模型列表
+    // 获取模型列表（填充到下拉菜单）
     fetchModelsBtn.addEventListener('click', async () => {
         const url = document.getElementById('ce-apiurl').value.trim();
         const key = document.getElementById('ce-apikey').value.trim();
+        const modelSelect = document.getElementById('ce-model');
 
         if (!url) {
             showToast('⚠️ 请先填写 API 地址', 'error');
@@ -417,14 +421,25 @@ function createPanel() {
                     models = data.map(m => m.id || m);
                 }
 
+                // 清空并填充下拉菜单
+                modelSelect.innerHTML = '';
                 if (models.length > 0) {
-                    const modelInput = document.getElementById('ce-model');
-                    const suggestions = models.slice(0, 10).join(', ');
-                    modelInput.placeholder = `建议: ${suggestions}`;
-                    modelInput.style.borderColor = '#5b7cfa';
-                    showToast(`✅ 获取到 ${models.length} 个模型，已显示建议`, 'success');
+                    // 去重
+                    const uniqueModels = [...new Set(models)];
+                    uniqueModels.forEach(modelId => {
+                        const option = document.createElement('option');
+                        option.value = modelId;
+                        option.textContent = modelId;
+                        modelSelect.appendChild(option);
+                    });
+                    // 如果当前保存的模型在列表中，自动选中
+                    if (settings.model && uniqueModels.includes(settings.model)) {
+                        modelSelect.value = settings.model;
+                    }
+                    showToast(`✅ 获取到 ${uniqueModels.length} 个模型`, 'success');
                 } else {
-                    showToast('⚠️ 未获取到模型列表，请手动输入', 'error');
+                    modelSelect.innerHTML = '<option value="">未获取到模型</option>';
+                    showToast('⚠️ 未获取到模型列表，请检查 API 是否支持 /models 端点', 'error');
                 }
             } else {
                 let errMsg = `HTTP ${resp.status}`;
@@ -446,7 +461,13 @@ function createPanel() {
 function populateUI() {
     document.getElementById('ce-apiurl').value = settings.apiUrl;
     document.getElementById('ce-apikey').value = settings.apiKey;
-    document.getElementById('ce-model').value = settings.model;
+    // 填充模型下拉菜单
+    const modelSelect = document.getElementById('ce-model');
+    if (settings.model) {
+        // 先清空，添加一个默认选项，再尝试设置值
+        modelSelect.innerHTML = `<option value="${settings.model}">${settings.model}</option>`;
+        // 如果后续获取到模型列表，会被刷新
+    }
     document.getElementById('ce-temperature').value = settings.temperature;
     document.getElementById('ce-context').value = settings.contextLength;
     document.getElementById('ce-max-tokens').value = settings.maxTokens;
