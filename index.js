@@ -1,9 +1,20 @@
 // ================================================================
-// 📝 角色提取器 (char-tiqu-baocun) - 自包含版
-// 所有 UI 内嵌，不依赖外部 HTML 文件
+// 📝 角色提取器 (char-tiqu-baocun) - 使用 eventSource 监听
+// 兼容 SillyTavern 标准 API，并自带备用方案
 // ================================================================
 
 import { getContext } from '../../../extensions.js';
+
+// 尝试导入 eventSource 和 event_types（可能因版本不同而失败）
+let eventSource, event_types;
+try {
+    const script = await import('../../../script.js');
+    eventSource = script.eventSource;
+    event_types = script.event_types;
+    console.log('[角色提取器] ✅ 成功导入 eventSource');
+} catch (e) {
+    console.warn('[角色提取器] ⚠️ 无法导入 eventSource，将使用备用监听方案', e);
+}
 
 // ---------- 默认设置 ----------
 const DEFAULT_SETTINGS = {
@@ -20,6 +31,7 @@ const DEFAULT_SETTINGS = {
 let settings = { ...DEFAULT_SETTINGS };
 let isExtracting = false;
 let context = null;
+let lastMessageCount = 0;
 
 // ---------- 设置管理 ----------
 function loadSettings() {
@@ -49,7 +61,7 @@ function showToast(message, type = 'info') {
     $toast.data('timer', setTimeout(() => $toast.fadeOut(300), 4000));
 }
 
-// ---------- 获取内置 HTML（内嵌） ----------
+// ---------- 获取内置 HTML ----------
 function getSettingsHTML() {
     return `
         <div id="ce-settings-container" style="padding:16px 20px; color:#e0e0e0; font-family: 'Segoe UI', system-ui, sans-serif;">
@@ -57,8 +69,6 @@ function getSettingsHTML() {
                 <h3 style="margin:0; font-size:18px; font-weight:600;">📝 角色提取器</h3>
                 <button id="ce-close-panel" style="background:transparent; border:none; color:#888; font-size:20px; cursor:pointer; padding:0 8px;">✕</button>
             </div>
-            
-            <!-- 启用开关 -->
             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; background:rgba(255,255,255,0.04); padding:10px 14px; border-radius:8px;">
                 <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:14px; user-select:none;">
                     <span style="font-weight:500;">启用插件</span>
@@ -66,8 +76,6 @@ function getSettingsHTML() {
                 </label>
                 <span id="ce-status-text" style="font-size:13px; color:#6f8; font-weight:500;">● 已启用</span>
             </div>
-
-            <!-- API 配置 -->
             <div style="background:rgba(255,255,255,0.04); padding:12px 14px; border-radius:8px; margin-bottom:12px;">
                 <div style="font-size:13px; font-weight:600; color:#aaa; margin-bottom:10px;">🔌 API 配置</div>
                 <div style="margin-bottom:8px;">
@@ -83,8 +91,6 @@ function getSettingsHTML() {
                     <input type="text" id="ce-model" style="width:100%; padding:6px 10px; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); border-radius:6px; color:#e0e0e0; box-sizing:border-box;">
                 </div>
             </div>
-
-            <!-- 提取设置 -->
             <div style="background:rgba(255,255,255,0.04); padding:12px 14px; border-radius:8px; margin-bottom:12px;">
                 <div style="font-size:13px; font-weight:600; color:#aaa; margin-bottom:10px;">⚙️ 提取设置</div>
                 <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
@@ -97,8 +103,6 @@ function getSettingsHTML() {
                     <input type="number" id="ce-temperature" min="0" max="1" step="0.05" style="flex:1; padding:6px 10px; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); border-radius:6px; color:#e0e0e0; box-sizing:border-box;">
                 </div>
             </div>
-
-            <!-- 世界书设置 -->
             <div style="background:rgba(255,255,255,0.04); padding:12px 14px; border-radius:8px; margin-bottom:14px;">
                 <div style="font-size:13px; font-weight:600; color:#aaa; margin-bottom:10px;">📋 世界书写入设置</div>
                 <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:#ccc; cursor:pointer; margin-bottom:4px;">
@@ -108,15 +112,11 @@ function getSettingsHTML() {
                     <input type="checkbox" id="ce-auto-open" checked style="accent-color:#5b7cfa;"> 写入后自动打开世界书面板
                 </label>
             </div>
-
-            <!-- 操作按钮 -->
             <div style="display:flex; gap:10px; flex-wrap:wrap;">
                 <button id="ce-save-btn" style="padding:8px 20px; background:#5b7cfa; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:500;">💾 保存设置</button>
                 <button id="ce-test-btn" style="padding:8px 20px; background:rgba(255,255,255,0.1); color:#ccc; border:none; border-radius:6px; cursor:pointer;">🔍 测试连接</button>
                 <button id="ce-reset-btn" style="padding:8px 20px; background:rgba(255,80,80,0.15); color:#f77; border:none; border-radius:6px; cursor:pointer;">↺ 重置默认</button>
             </div>
-
-            <!-- Toast 提示 -->
             <div id="ce-toast" style="margin-top:12px; display:none; padding:8px 12px; border-radius:6px; background:rgba(91,124,250,0.15); border:1px solid rgba(91,124,250,0.25); color:#b8c8ff; font-size:13px;"></div>
         </div>
     `;
@@ -139,7 +139,6 @@ function renderSettings() {
     populateSettings();
     updateStatusDisplay();
 
-    // 添加到扩展菜单
     addToExtensionsMenu(() => {
         if ($container.is(':visible')) {
             $container.hide();
@@ -148,7 +147,6 @@ function renderSettings() {
         }
     });
 
-    // 点击外部关闭
     $(document).off('click.ce').on('click.ce', function(e) {
         if ($container.is(':visible') &&
             !$(e.target).closest('#ce-ext-container').length &&
@@ -446,48 +444,109 @@ function writeToWorldbook(characters) {
     }
 }
 
-// ---------- 监听聊天 ----------
-function setupListener() {
+// ---------- 核心：处理新消息 ----------
+async function handleNewMessage() {
+    if (!settings.enabled) return;
+    if (isExtracting) return;
+    if (!window.world_info) {
+        console.warn('[角色提取器] ⚠️ 世界书未加载，跳过提取');
+        return;
+    }
     if (!context) {
         context = getContext();
-        if (!context) {
-            console.error('[角色提取器] ❌ 无法获取 SillyTavern 上下文');
-            return;
+        if (!context) return;
+    }
+    const chat = context.chat;
+    if (!chat?.messages) return;
+    const messages = chat.messages;
+    if (messages.length === 0) return;
+
+    // 检查最后一条消息是不是 AI 发的（且是新的）
+    const last = messages[messages.length - 1];
+    if (!last || last.is_user) return; // 如果是用户消息，则跳过（但我们关心AI回复，但事件触发时可能正好是AI回复）
+
+    // 为了避免重复处理，记录最后处理的消息索引
+    // 简单做法：比较长度变化
+    if (messages.length === lastMessageCount) return;
+    lastMessageCount = messages.length;
+
+    const recent = messages.slice(-settings.maxMessages);
+    const conversationText = recent
+        .map(msg => `${msg.name || 'User'}: ${msg.text || ''}`)
+        .join('\n');
+
+    if (conversationText.trim().length < 20) return;
+
+    isExtracting = true;
+    try {
+        const characters = await extractCharacters(conversationText);
+        if (characters && characters.length > 0) {
+            writeToWorldbook(characters);
         }
+    } catch (e) {
+        console.error('[角色提取器] 提取过程出错:', e);
+    } finally {
+        isExtracting = false;
+    }
+}
+
+// ---------- 设置监听器 ----------
+function setupListener() {
+    context = getContext();
+    if (!context) {
+        console.error('[角色提取器] ❌ 无法获取 SillyTavern 上下文');
+        return;
+    }
+    lastMessageCount = context.chat?.messages?.length || 0;
+
+    // 首选方案：使用 eventSource
+    if (eventSource && event_types) {
+        console.log('[角色提取器] 📡 使用 eventSource 监听 MESSAGE_RECEIVED');
+        eventSource.on(event_types.MESSAGE_RECEIVED, async (index) => {
+            // 当收到新消息（包括用户和AI）时触发
+            // 我们需要判断是不是AI的新消息
+            if (!settings.enabled) return;
+            if (isExtracting) return;
+            const chat = context.chat;
+            if (!chat?.messages) return;
+            const messages = chat.messages;
+            if (messages.length === 0) return;
+            const last = messages[messages.length - 1];
+            // 如果最后一条消息是AI发的，且索引大于等于上次处理的数量，则处理
+            if (last && !last.is_user && messages.length > lastMessageCount) {
+                lastMessageCount = messages.length;
+                await handleNewMessage();
+            } else {
+                // 如果是用户消息，只更新计数，不处理
+                lastMessageCount = messages.length;
+            }
+        });
+        console.log('[角色提取器] ✅ eventSource 监听已启动');
+        return;
     }
 
-    context.on('message', async (message) => {
+    // 备用方案：轮询检查（每2秒检查一次）
+    console.log('[角色提取器] 📡 使用轮询方案监听新消息（每秒检查）');
+    setInterval(() => {
         if (!settings.enabled) return;
-        if (!message.isNew || !message.isAi) return;
         if (isExtracting) return;
-        if (!window.world_info) {
-            console.warn('[角色提取器] ⚠️ 世界书未加载，跳过提取');
-            return;
-        }
-
+        if (!context) return;
         const chat = context.chat;
         if (!chat?.messages) return;
-        const recent = chat.messages.slice(-settings.maxMessages);
-        const conversationText = recent
-            .map(msg => `${msg.name || 'User'}: ${msg.text || ''}`)
-            .join('\n');
+        const messages = chat.messages;
+        if (messages.length === 0) return;
+        if (messages.length <= lastMessageCount) return;
 
-        if (conversationText.trim().length < 20) return;
-
-        isExtracting = true;
-        try {
-            const characters = await extractCharacters(conversationText);
-            if (characters && characters.length > 0) {
-                writeToWorldbook(characters);
-            }
-        } catch (e) {
-            console.error('[角色提取器] 提取过程出错:', e);
-        } finally {
-            isExtracting = false;
+        // 检查最后一条是不是AI的
+        const last = messages[messages.length - 1];
+        if (last && !last.is_user) {
+            lastMessageCount = messages.length;
+            handleNewMessage();
+        } else {
+            lastMessageCount = messages.length;
         }
-    });
-
-    console.log('[角色提取器] ✅ 消息监听已启动');
+    }, 2000);
+    console.log('[角色提取器] ✅ 轮询监听已启动');
 }
 
 // ---------- 插件入口 ----------
@@ -500,7 +559,6 @@ jQuery(async () => {
         console.log('[角色提取器] ✅ 插件已加载');
     } catch (e) {
         console.error('[角色提取器] ❌ 加载失败:', e);
-        // 显示错误提示
         $('body').append(`<div style="position:fixed; bottom:10px; right:10px; background:#c0392b; color:#fff; padding:8px 16px; border-radius:4px; z-index:99999; font-size:14px;">⚠️ 角色提取器加载失败: ${e.message}</div>`);
         setTimeout(() => $('body').find('div:last').remove(), 10000);
     }
