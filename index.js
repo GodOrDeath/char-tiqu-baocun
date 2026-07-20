@@ -1,5 +1,6 @@
 // ============================================================
-// 角色提取保存 扩展 - 带UI面板 + OpenAI兼容API
+// 角色提取保存 扩展 - 通用 OpenAI 格式 API 配置面板
+// 模仿“总结模型”界面，可保存设置、测试连接、获取模型列表
 // ============================================================
 
 console.log('[角色提取保存] 扩展加载中...');
@@ -7,15 +8,14 @@ console.log('[角色提取保存] 扩展加载中...');
 (function () {
     'use strict';
 
-    // ---------- 获取主窗口 ----------
     const win = window.parent || window;
     const doc = win.document;
 
-    // ---------- 样式（UI面板） ----------
+    // ---------- 样式 ----------
     const CSS = `
         #ctb-panel {
             position: fixed; left: 0; top: 0; z-index: 30000;
-            width: min(420px, 94vw); max-height: min(80vh, calc(100dvh - 20px));
+            width: min(480px, 94vw); max-height: min(85vh, calc(100dvh - 20px));
             display: flex; flex-direction: column;
             background: var(--SmartThemeBlurTintColor, rgba(24,24,28,0.96));
             color: var(--SmartThemeBodyColor, #ddd);
@@ -40,40 +40,71 @@ console.log('[角色提取保存] 扩展加载中...');
         }
         #ctb-panel .ctb-head button:hover { opacity: 1; }
         #ctb-panel .ctb-body {
-            padding: 12px; overflow-y: auto; flex: 1;
+            padding: 14px 16px; overflow-y: auto; flex: 1;
             display: flex; flex-direction: column; gap: 8px;
         }
-        #ctb-panel .ctb-row {
-            display: flex; gap: 6px; align-items: center;
+        #ctb-panel .ctb-field {
+            display: flex; align-items: center; gap: 8px;
         }
-        #ctb-panel .ctb-row label {
-            flex: 0 0 70px; text-align: right; opacity: 0.8;
-            font-size: 12px;
+        #ctb-panel .ctb-field label {
+            flex: 0 0 110px; text-align: right; opacity: 0.8;
+            font-size: 12px; font-weight: 500;
         }
-        #ctb-panel .ctb-row input, #ctb-panel .ctb-row textarea {
+        #ctb-panel .ctb-field input, #ctb-panel .ctb-field select {
             flex: 1; background: transparent; color: inherit;
             border: 1px solid var(--SmartThemeBorderColor, #555);
             border-radius: 6px; padding: 4px 7px; font-size: 12px;
+            height: 28px; box-sizing: border-box;
         }
-        #ctb-panel .ctb-row textarea {
-            min-height: 60px; resize: vertical;
-            font-family: inherit;
+        #ctb-panel .ctb-field input[type="checkbox"] {
+            flex: 0 0 auto; width: 18px; height: 18px;
+            accent-color: var(--SmartThemeQuoteColor, #4a6fa5);
         }
-        #ctb-panel .ctb-response {
-            background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px;
-            white-space: pre-wrap; word-break: break-word;
-            max-height: 200px; overflow: auto;
-            border: 1px solid var(--SmartThemeBorderColor, #444);
+        #ctb-panel .ctb-field .ctb-check-label {
+            flex: 0 0 auto; text-align: left; opacity: 0.8;
             font-size: 12px;
         }
+        #ctb-panel .ctb-actions {
+            display: flex; gap: 8px; margin-top: 4px;
+            justify-content: flex-end;
+        }
         #ctb-panel .ctb-btn {
-            padding: 6px 12px; border: none; border-radius: 6px;
+            padding: 5px 14px; border: none; border-radius: 6px;
             background: var(--SmartThemeQuoteColor, #4a6fa5);
             color: #fff; font-weight: 600; cursor: pointer;
+            font-size: 12px;
         }
         #ctb-panel .ctb-btn:hover { filter: brightness(1.15); }
+        #ctb-panel .ctb-btn.ctb-test { background: #2d8b5e; }
+        #ctb-panel .ctb-btn.ctb-models { background: #b58a4a; }
         #ctb-panel .ctb-status {
-            font-size: 12px; opacity: 0.7; margin-top: 4px;
+            font-size: 12px; opacity: 0.8; margin-top: 4px;
+            padding: 4px 8px; border-radius: 4px;
+            background: color-mix(in srgb, var(--SmartThemeQuoteColor, #4a6fa5) 12%, transparent);
+            min-height: 20px;
+        }
+        #ctb-panel .ctb-status.error {
+            background: color-mix(in srgb, #d05555 25%, transparent);
+            color: #ffa0a0;
+        }
+        #ctb-panel .ctb-status.success {
+            background: color-mix(in srgb, #2d8b5e 25%, transparent);
+            color: #a0e0a0;
+        }
+        #ctb-panel .ctb-response {
+            margin-top: 4px; padding: 6px 8px; border-radius: 6px;
+            background: rgba(0,0,0,0.2); border: 1px solid var(--SmartThemeBorderColor, #444);
+            white-space: pre-wrap; word-break: break-word;
+            max-height: 120px; overflow: auto;
+            font-size: 12px; display: none;
+        }
+        .ctb-field-group {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px;
+        }
+        .ctb-field-group .ctb-field { flex: 1; }
+        .ctb-field-group .ctb-field label { flex: 0 0 80px; }
+        @media (max-width: 480px) {
+            .ctb-field-group { grid-template-columns: 1fr; }
         }
     `;
 
@@ -82,31 +113,76 @@ console.log('[角色提取保存] 扩展加载中...');
     styleEl.textContent = CSS;
     doc.head.appendChild(styleEl);
 
-    // ---------- 创建UI面板 ----------
+    // ---------- 创建面板 ----------
     const panel = doc.createElement('div');
     panel.id = 'ctb-panel';
     panel.className = 'ctb-hidden';
     panel.innerHTML = `
         <div class="ctb-head">
-            <span>🤖 角色提取保存</span>
+            <span>⚙️ 总结模型</span>
             <button data-act="close">✕</button>
         </div>
         <div class="ctb-body">
-            <div class="ctb-row"><label>API地址</label><input id="ctb-api-url" placeholder="https://api.openai.com/v1/chat/completions" /></div>
-            <div class="ctb-row"><label>API密钥</label><input id="ctb-api-key" type="password" placeholder="sk-..." /></div>
-            <div class="ctb-row"><label>模型</label><input id="ctb-model" placeholder="gpt-3.5-turbo" /></div>
-            <div class="ctb-row"><label>消息</label><textarea id="ctb-prompt" placeholder="输入要发送的内容..."></textarea></div>
-            <div class="ctb-row" style="justify-content:flex-end;">
-                <button class="ctb-btn" data-act="send">🚀 发送</button>
-                <button class="ctb-btn" data-act="clear">🗑️ 清空响应</button>
+            <div class="ctb-field">
+                <label>API 类型</label>
+                <input id="ctb-api-type" value="自定义OpenAI" readonly style="opacity:0.7;cursor:default;" />
             </div>
-            <div id="ctb-response" class="ctb-response">等待响应...</div>
+            <div class="ctb-field">
+                <label>自定义端点</label>
+                <input id="ctb-api-url" placeholder="https://api.openai.com/v1" />
+            </div>
+            <div class="ctb-field">
+                <label>API Key</label>
+                <input id="ctb-api-key" type="password" placeholder="sk-..." />
+            </div>
+            <div class="ctb-field">
+                <label>选择或输入模型</label>
+                <input id="ctb-model" placeholder="gpt-3.5-turbo" list="ctb-model-list" />
+                <datalist id="ctb-model-list"></datalist>
+            </div>
+            <div class="ctb-field-group">
+                <div class="ctb-field">
+                    <label>温度</label>
+                    <input id="ctb-temperature" type="number" step="0.1" value="1" />
+                </div>
+                <div class="ctb-field">
+                    <label>上下文</label>
+                    <input id="ctb-context" type="number" value="2000000" />
+                </div>
+                <div class="ctb-field">
+                    <label>最大输出</label>
+                    <input id="ctb-max-tokens" type="number" value="65000" />
+                </div>
+                <div class="ctb-field" style="justify-content:flex-start; gap:4px;">
+                    <label style="flex:0 0 auto;">流式</label>
+                    <input id="ctb-stream" type="checkbox" checked />
+                    <span class="ctb-check-label">开启</span>
+                </div>
+            </div>
+            <div class="ctb-actions">
+                <button class="ctb-btn ctb-test" data-act="test">🧪 测试</button>
+                <button class="ctb-btn ctb-models" data-act="list-models">📋 获取模型</button>
+                <button class="ctb-btn" data-act="save">💾 保存</button>
+            </div>
             <div id="ctb-status" class="ctb-status">就绪</div>
+            <div id="ctb-response" class="ctb-response"></div>
         </div>
     `;
     doc.body.appendChild(panel);
 
-    // ---------- 持久化设置 ----------
+    // ---------- DOM 引用 ----------
+    const urlInput = doc.getElementById('ctb-api-url');
+    const keyInput = doc.getElementById('ctb-api-key');
+    const modelInput = doc.getElementById('ctb-model');
+    const tempInput = doc.getElementById('ctb-temperature');
+    const ctxInput = doc.getElementById('ctb-context');
+    const maxInput = doc.getElementById('ctb-max-tokens');
+    const streamCheck = doc.getElementById('ctb-stream');
+    const statusDiv = doc.getElementById('ctb-status');
+    const responseDiv = doc.getElementById('ctb-response');
+    const modelList = doc.getElementById('ctb-model-list');
+
+    // ---------- 设置持久化 ----------
     const SETTINGS_KEY = 'ctb_settings';
     function loadSettings() {
         try {
@@ -114,85 +190,189 @@ console.log('[角色提取保存] 扩展加载中...');
             return raw ? JSON.parse(raw) : {};
         } catch { return {}; }
     }
-    function saveSettings(settings) {
+    function saveSettingsToStorage(settings) {
         try {
             win.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
         } catch {}
     }
 
-    // ---------- 填充设置 ----------
-    const settings = loadSettings();
-    const urlInput = doc.getElementById('ctb-api-url');
-    const keyInput = doc.getElementById('ctb-api-key');
-    const modelInput = doc.getElementById('ctb-model');
-    const promptInput = doc.getElementById('ctb-prompt');
-    const responseDiv = doc.getElementById('ctb-response');
-    const statusDiv = doc.getElementById('ctb-status');
+    // 填充已保存的值
+    const saved = loadSettings();
+    urlInput.value = saved.url || 'https://gcli.ggchan.dev/v1';
+    keyInput.value = saved.key || '';
+    modelInput.value = saved.model || 'gemini-3.1-pro-preview';
+    tempInput.value = saved.temperature ?? 1;
+    ctxInput.value = saved.context ?? 2000000;
+    maxInput.value = saved.max_tokens ?? 65000;
+    streamCheck.checked = saved.stream !== undefined ? saved.stream : true;
 
-    if (settings.url) urlInput.value = settings.url;
-    if (settings.key) keyInput.value = settings.key;
-    if (settings.model) modelInput.value = settings.model;
+    // 自动保存所有字段（除了模型列表）
+    function autoSave() {
+        const settings = {
+            url: urlInput.value.trim(),
+            key: keyInput.value.trim(),
+            model: modelInput.value.trim(),
+            temperature: parseFloat(tempInput.value) || 1,
+            context: parseInt(ctxInput.value) || 2000000,
+            max_tokens: parseInt(maxInput.value) || 65000,
+            stream: streamCheck.checked,
+        };
+        saveSettingsToStorage(settings);
+    }
 
-    // 自动保存输入变化
-    [urlInput, keyInput, modelInput].forEach(el => {
-        el.addEventListener('change', () => {
-            settings.url = urlInput.value;
-            settings.key = keyInput.value;
-            settings.model = modelInput.value;
-            saveSettings(settings);
-        });
+    [urlInput, keyInput, modelInput, tempInput, ctxInput, maxInput, streamCheck].forEach(el => {
+        el.addEventListener('change', autoSave);
+        el.addEventListener('input', autoSave);
     });
 
-    // ---------- API调用函数 ----------
-    async function callOpenAI(prompt) {
-        const url = urlInput.value.trim();
-        const key = keyInput.value.trim();
-        const model = modelInput.value.trim() || 'gpt-3.5-turbo';
+    // ---------- 显示状态 ----------
+    function setStatus(msg, type = '') {
+        statusDiv.textContent = msg;
+        statusDiv.className = 'ctb-status' + (type ? ' ' + type : '');
+    }
 
-        if (!url) { statusDiv.textContent = '⚠️ 请填写API地址'; return; }
-        if (!key) { statusDiv.textContent = '⚠️ 请填写API密钥'; return; }
-        if (!prompt) { statusDiv.textContent = '⚠️ 请输入消息'; return; }
-
-        statusDiv.textContent = '⏳ 发送请求中...';
-        responseDiv.textContent = '等待响应...';
-
-        try {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${key}`
-                },
-                body: JSON.stringify({
-                    model: model,
-                    messages: [{ role: 'user', content: prompt }],
-                    temperature: 0.7,
-                })
-            });
-
-            if (!response.ok) {
-                const errText = await response.text();
-                throw new Error(`HTTP ${response.status}: ${errText}`);
-            }
-
-            const data = await response.json();
-            const content = data.choices?.[0]?.message?.content || '（无内容）';
-            responseDiv.textContent = content;
-            statusDiv.textContent = '✅ 响应成功';
-        } catch (err) {
-            statusDiv.textContent = '❌ 错误: ' + err.message;
-            responseDiv.textContent = '错误: ' + err.message;
+    function showResponse(text) {
+        if (text) {
+            responseDiv.style.display = 'block';
+            responseDiv.textContent = text;
+        } else {
+            responseDiv.style.display = 'none';
         }
     }
 
-    // ---------- 面板显示/隐藏 ----------
+    // ---------- API 调用函数 ----------
+    async function callOpenAI(messages, options = {}) {
+        const url = urlInput.value.trim();
+        const key = keyInput.value.trim();
+        const model = modelInput.value.trim() || 'gpt-3.5-turbo';
+        const temperature = parseFloat(tempInput.value) || 1;
+        const max_tokens = parseInt(maxInput.value) || 65000;
+        const stream = streamCheck.checked;
+
+        if (!url) throw new Error('请填写 API 端点地址');
+        if (!key) throw new Error('请填写 API Key');
+
+        const headers = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${key}`
+        };
+
+        const body = {
+            model,
+            messages,
+            temperature,
+            max_tokens,
+            stream,
+            ...options
+        };
+
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body)
+        });
+
+        if (!resp.ok) {
+            const errText = await resp.text();
+            throw new Error(`HTTP ${resp.status}: ${errText}`);
+        }
+
+        if (stream) {
+            // 简单处理：流式响应，但测试时我们只取第一个块
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let result = '';
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n').filter(line => line.startsWith('data: '));
+                for (const line of lines) {
+                    const data = line.slice(6);
+                    if (data === '[DONE]') continue;
+                    try {
+                        const parsed = JSON.parse(data);
+                        const content = parsed.choices?.[0]?.delta?.content;
+                        if (content) result += content;
+                    } catch (e) {}
+                }
+            }
+            return result;
+        } else {
+            const data = await resp.json();
+            const content = data.choices?.[0]?.message?.content || '';
+            return content;
+        }
+    }
+
+    // ---------- 测试连接 ----------
+    async function testConnection() {
+        setStatus('⏳ 测试中...', '');
+        showResponse('');
+        try {
+            const result = await callOpenAI([
+                { role: 'user', content: 'Hello, please respond with "OK" only.' }
+            ]);
+            setStatus('✅ 测试成功', 'success');
+            showResponse(result);
+        } catch (err) {
+            setStatus('❌ 测试失败: ' + err.message, 'error');
+            showResponse('错误: ' + err.message);
+        }
+    }
+
+    // ---------- 获取模型列表 ----------
+    async function listModels() {
+        const url = urlInput.value.trim();
+        const key = keyInput.value.trim();
+        if (!url) { setStatus('⚠️ 请先填写 API 端点', 'error'); return; }
+        if (!key) { setStatus('⚠️ 请先填写 API Key', 'error'); return; }
+
+        setStatus('⏳ 获取模型列表...', '');
+        showResponse('');
+        try {
+            const modelsUrl = url.replace(/\/+$/, '') + '/models';
+            const resp = await fetch(modelsUrl, {
+                headers: { 'Authorization': `Bearer ${key}` }
+            });
+            if (!resp.ok) {
+                const errText = await resp.text();
+                throw new Error(`HTTP ${resp.status}: ${errText}`);
+            }
+            const data = await resp.json();
+            const models = data.data?.map(m => m.id) || [];
+            if (!models.length) {
+                setStatus('⚠️ 未获取到模型', 'error');
+                return;
+            }
+            // 填充 datalist
+            modelList.innerHTML = models.map(m => `<option value="${m}">`).join('');
+            setStatus(`✅ 获取到 ${models.length} 个模型`, 'success');
+            showResponse(models.join('\n'));
+        } catch (err) {
+            setStatus('❌ 获取失败: ' + err.message, 'error');
+            showResponse('错误: ' + err.message);
+        }
+    }
+
+    // ---------- 保存设置 ----------
+    function saveSettings() {
+        autoSave();
+        setStatus('💾 设置已保存', 'success');
+        showResponse('');
+    }
+
+    // ---------- 面板控制 ----------
     function togglePanel() {
         const hidden = panel.classList.toggle('ctb-hidden');
         if (!hidden) {
-            // 定位
+            // 定位到屏幕中间
             const rect = panel.getBoundingClientRect();
             panel.style.left = `${Math.max(8, (win.innerWidth - rect.width) / 2)}px`;
             panel.style.top = `${Math.max(8, (win.innerHeight - rect.height) / 2)}px`;
+            // 恢复状态
+            setStatus('就绪', '');
+            showResponse('');
         }
     }
 
@@ -224,28 +404,19 @@ console.log('[角色提取保存] 扩展加载中...');
         });
     })();
 
-    // ---------- 面板内事件 ----------
+    // ---------- 面板事件绑定 ----------
     panel.addEventListener('click', (e) => {
         const target = e.target.closest('[data-act]');
         if (!target) return;
         const act = target.dataset.act;
         if (act === 'close') {
             panel.classList.add('ctb-hidden');
-        } else if (act === 'send') {
-            const prompt = promptInput.value.trim();
-            if (prompt) callOpenAI(prompt);
-        } else if (act === 'clear') {
-            responseDiv.textContent = '（已清空）';
-            statusDiv.textContent = '就绪';
-        }
-    });
-
-    // 允许Ctrl+Enter发送
-    promptInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-            e.preventDefault();
-            const prompt = promptInput.value.trim();
-            if (prompt) callOpenAI(prompt);
+        } else if (act === 'test') {
+            testConnection();
+        } else if (act === 'list-models') {
+            listModels();
+        } else if (act === 'save') {
+            saveSettings();
         }
     });
 
@@ -271,10 +442,9 @@ console.log('[角色提取保存] 扩展加载中...');
         console.log('[角色提取保存] ✅ 菜单项已注入');
     }
 
-    // 启动注入
     injectMenuItem();
 
-    // ---------- 页面resize时让面板不跑出边界（简易） ----------
+    // ---------- 窗口resize适配 ----------
     win.addEventListener('resize', () => {
         if (panel.classList.contains('ctb-hidden')) return;
         const rect = panel.getBoundingClientRect();
@@ -284,5 +454,5 @@ console.log('[角色提取保存] 扩展加载中...');
         panel.style.top = top + 'px';
     });
 
-    console.log('[角色提取保存] 扩展初始化完成');
+    console.log('[角色提取保存] 扩展初始化完成 (UI 已更新为总结模型配置)');
 })();
