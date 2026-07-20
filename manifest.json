@@ -1,8 +1,8 @@
 {
-  "display_name": "角色提取保存",
-  "name": "char-tiqu-baocun",
-  "version": "1.0.0",
-  "author": "你的GitHub用户名",
-  "description": "一键提取并保存当前角色卡数据，支持下载JSON和复制到剪贴板。",
-  "js": "index.js"
+    "display_name": "角色提取保存",
+    "name": "char-tiqu-baocun",
+    "version": "1.0.0",
+    "author": "your_name",
+    "description": "只是一个演示按钮",
+    "js": "index.js"
 }
