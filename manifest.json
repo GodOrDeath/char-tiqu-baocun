@@ -3,6 +3,6 @@
     "name": "char-tiqu-baocun",
     "version": "1.0.0",
     "author": "your_name",
-    "description": "在魔法棒菜单中添加一个按钮",
+    "description": "通用 OpenAI 格式 API 配置与测试面板",
     "js": "index.js"
 }
