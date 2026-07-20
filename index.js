@@ -1,6 +1,6 @@
 // ================================================================
 // 📝 角色提取器 (char-tiqu-baocun)
-// 功能：可拖动图标 + API 配置面板（优化模型选择与连接）
+// 通过 SillyTavern 后端代理转发 API 请求，解决 CORS
 // ================================================================
 
 import { getContext } from '../../../extensions.js';
@@ -8,9 +8,9 @@ import { getContext } from '../../../extensions.js';
 // ---------- 默认设置 ----------
 const DEFAULT_SETTINGS = {
     apiType: 'custom_openai',
-    apiUrl: 'https://gcli.ggchan.dev/v1/chat/completions', // 调整了默认端点
+    apiUrl: 'https://gcli.ggchan.dev/v1/chat/completions',
     apiKey: '',
-    model: 'gemini-3.1-pro-preview', // 使用一个常见的可用模型作为默认
+    model: 'gemini-3.1-pro-preview',
     temperature: 0.3,
     contextLength: 2000000,
     maxTokens: 65000,
@@ -55,6 +55,33 @@ function showToast(message, type = 'info') {
     toast.style.color = c.text;
     clearTimeout(toast._timer);
     toast._timer = setTimeout(() => { toast.style.display = 'none'; }, 4000);
+}
+
+// ---------- 获取酒馆后端代理地址 ----------
+function getProxyBase() {
+    // 使用当前页面的 origin（例如 http://localhost:8000）
+    return window.location.origin;
+}
+
+// ---------- 通过代理发送请求 ----------
+async function proxyFetch(targetUrl, method, headers, body, isStream = false) {
+    const proxyUrl = `${getProxyBase()}/api/proxy`;
+    const response = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            targetUrl: targetUrl,
+            method: method,
+            headers: headers || {},
+            body: body,
+            isStream: isStream,
+        }),
+    });
+    if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Proxy Error ${response.status}: ${errText}`);
+    }
+    return response;
 }
 
 // ---------- 创建 UI 面板 HTML ----------
@@ -334,7 +361,7 @@ function createPanel() {
         showToast('✅ 设置已保存', 'success');
     });
 
-    // 测试连接
+    // 测试连接（通过代理）
     testBtn.addEventListener('click', async () => {
         const url = document.getElementById('ce-apiurl').value.trim();
         const key = document.getElementById('ce-apikey').value.trim();
@@ -352,37 +379,24 @@ function createPanel() {
 
         showToast('⏳ 测试连接中...', 'info');
         try {
-            const resp = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${key}`,
-                },
-                body: JSON.stringify({
-                    model: model,
-                    messages: [{ role: 'user', content: 'Hi' }],
-                    max_tokens: 5,
-                })
-            });
+            const response = await proxyFetch(url, 'POST', {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${key}`,
+            }, JSON.stringify({
+                model: model,
+                messages: [{ role: 'user', content: 'Hi' }],
+                max_tokens: 5,
+            }));
 
-            if (resp.ok) {
-                const data = await resp.json();
-                const modelUsed = data.model || model;
-                showToast(`✅ 连接成功！模型: ${modelUsed}`, 'success');
-            } else {
-                let errMsg = `HTTP ${resp.status}`;
-                try {
-                    const errData = await resp.json();
-                    errMsg = errData.error?.message || errData.message || errMsg;
-                } catch (e) { /* ignore */ }
-                showToast(`❌ 连接失败: ${errMsg}`, 'error');
-            }
-        } catch (e) {
-            showToast(`❌ 连接异常: ${e.message}`, 'error');
+            const data = await response.json();
+            const modelUsed = data.model || model;
+            showToast(`✅ 连接成功！模型: ${modelUsed}`, 'success');
+        } catch (err) {
+            showToast(`❌ 连接失败: ${err.message}`, 'error');
         }
     });
 
-    // 获取模型列表（填充到下拉菜单）
+    // 获取模型列表（通过代理）
     fetchModelsBtn.addEventListener('click', async () => {
         const url = document.getElementById('ce-apiurl').value.trim();
         const key = document.getElementById('ce-apikey').value.trim();
@@ -403,54 +417,40 @@ function createPanel() {
 
         showToast('⏳ 获取模型列表中...', 'info');
         try {
-            const resp = await fetch(`${baseUrl}/models`, {
-                method: 'GET',
-                headers: {
-                    'Authorization': `Bearer ${key}`,
-                },
-            });
+            const response = await proxyFetch(`${baseUrl}/models`, 'GET', {
+                'Authorization': `Bearer ${key}`,
+            }, null);
 
-            if (resp.ok) {
-                const data = await resp.json();
-                let models = [];
-                if (data.data && Array.isArray(data.data)) {
-                    models = data.data.map(m => m.id || m);
-                } else if (data.models && Array.isArray(data.models)) {
-                    models = data.models.map(m => m.id || m);
-                } else if (Array.isArray(data)) {
-                    models = data.map(m => m.id || m);
-                }
-
-                // 清空并填充下拉菜单
-                modelSelect.innerHTML = '';
-                if (models.length > 0) {
-                    // 去重
-                    const uniqueModels = [...new Set(models)];
-                    uniqueModels.forEach(modelId => {
-                        const option = document.createElement('option');
-                        option.value = modelId;
-                        option.textContent = modelId;
-                        modelSelect.appendChild(option);
-                    });
-                    // 如果当前保存的模型在列表中，自动选中
-                    if (settings.model && uniqueModels.includes(settings.model)) {
-                        modelSelect.value = settings.model;
-                    }
-                    showToast(`✅ 获取到 ${uniqueModels.length} 个模型`, 'success');
-                } else {
-                    modelSelect.innerHTML = '<option value="">未获取到模型</option>';
-                    showToast('⚠️ 未获取到模型列表，请检查 API 是否支持 /models 端点', 'error');
-                }
-            } else {
-                let errMsg = `HTTP ${resp.status}`;
-                try {
-                    const errData = await resp.json();
-                    errMsg = errData.error?.message || errData.message || errMsg;
-                } catch (e) { /* ignore */ }
-                showToast(`❌ 获取失败: ${errMsg}`, 'error');
+            const data = await response.json();
+            let models = [];
+            if (data.data && Array.isArray(data.data)) {
+                models = data.data.map(m => m.id || m);
+            } else if (data.models && Array.isArray(data.models)) {
+                models = data.models.map(m => m.id || m);
+            } else if (Array.isArray(data)) {
+                models = data.map(m => m.id || m);
             }
-        } catch (e) {
-            showToast(`❌ 获取异常: ${e.message}`, 'error');
+
+            // 清空并填充下拉菜单
+            modelSelect.innerHTML = '';
+            if (models.length > 0) {
+                const uniqueModels = [...new Set(models)];
+                uniqueModels.forEach(modelId => {
+                    const option = document.createElement('option');
+                    option.value = modelId;
+                    option.textContent = modelId;
+                    modelSelect.appendChild(option);
+                });
+                if (settings.model && uniqueModels.includes(settings.model)) {
+                    modelSelect.value = settings.model;
+                }
+                showToast(`✅ 获取到 ${uniqueModels.length} 个模型`, 'success');
+            } else {
+                modelSelect.innerHTML = '<option value="">未获取到模型</option>';
+                showToast('⚠️ 未获取到模型列表', 'error');
+            }
+        } catch (err) {
+            showToast(`❌ 获取失败: ${err.message}`, 'error');
         }
     });
 
@@ -461,12 +461,9 @@ function createPanel() {
 function populateUI() {
     document.getElementById('ce-apiurl').value = settings.apiUrl;
     document.getElementById('ce-apikey').value = settings.apiKey;
-    // 填充模型下拉菜单
     const modelSelect = document.getElementById('ce-model');
     if (settings.model) {
-        // 先清空，添加一个默认选项，再尝试设置值
         modelSelect.innerHTML = `<option value="${settings.model}">${settings.model}</option>`;
-        // 如果后续获取到模型列表，会被刷新
     }
     document.getElementById('ce-temperature').value = settings.temperature;
     document.getElementById('ce-context').value = settings.contextLength;
