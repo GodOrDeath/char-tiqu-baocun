@@ -1,482 +1,249 @@
-// ================================================================
-// 📝 角色提取器 (char-tiqu-baocun)
-// 功能：可拖动图标 + OpenAI 格式 API 配置面板（支持多 API 类型）
-// 通过 /api/proxy 转发请求，解决 CORS（已修复 403 认证问题）
-// ================================================================
+import { extension_settings, loadExtensionSettings } from "../../../scripts/extensions.js";
+import { saveSettingsDebounced } from "../../../scripts/settings.js";
 
-// ---------- 默认设置 ----------
+const EXT_NAME = "char-tiqu-baocun";
+const PANEL_ID = "charTiquBaocunDrawer";
+// 默认配置
 const DEFAULT_SETTINGS = {
-    apiType: 'custom_openai',          // 新增：API 类型 key
-    apiUrl: 'https://gcli.ggchan.dev/v1/chat/completions',
-    apiKey: '',
-    model: 'gemini-2.0-flash',
-    temperature: 0.3,
-    contextLength: 2000000,
-    maxTokens: 65000,
-    stream: false,
+    apiBaseUrl: "http://127.0.0.1:8000/api",
+    apiKey: "",
+    apiTimeout: 15000,
+    autoConnect: false
 };
 
-// 支持的 API 类型列表（显示名称 + 默认端点）
-const API_TYPES = {
-    custom_openai: {
-        label: '自定义 OpenAI',
-        defaultUrl: 'https://gcli.ggchan.dev/v1/chat/completions',
-        endpointEditable: true,
-    },
-    anthropic: {
-        label: 'Anthropic (Claude)',
-        defaultUrl: 'https://api.anthropic.com/v1/messages',
-        endpointEditable: false,
-    },
-    // 可继续添加更多类型...
-};
-
-let settings = { ...DEFAULT_SETTINGS };
-let panelVisible = false;
-let buttonCreated = false;
-
-// ---------- 辅助：获取酒馆上下文中的 CSRF Token ----------
-function getCsrfToken() {
-    try {
-        if (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) {
-            const ctx = SillyTavern.getContext();
-            if (ctx.csrfToken) return ctx.csrfToken;
-        }
-    } catch (e) { /* ignore */ }
-    const meta = document.querySelector('meta[name="csrf-token"]');
-    if (meta) return meta.content;
-    return '';
-}
-
-// ---------- 设置管理 ----------
-function loadSettings() {
-    try {
-        const stored = localStorage.getItem('ce-settings');
-        if (stored) {
-            const parsed = JSON.parse(stored);
-            settings = { ...DEFAULT_SETTINGS, ...parsed };
-        }
-    } catch (e) { /* ignore */ }
-}
-
-function saveSettings() {
-    try {
-        localStorage.setItem('ce-settings', JSON.stringify(settings));
-    } catch (e) { /* ignore */ }
-}
-
-// ---------- Toast ----------
-function showToast(message, type = 'info') {
-    const toast = document.getElementById('ce-toast');
-    if (!toast) return;
-    toast.textContent = message;
-    toast.style.display = 'block';
-    const colors = {
-        success: { bg: 'rgba(100,220,100,0.12)', border: 'rgba(100,220,100,0.2)', text: '#8f8' },
-        error: { bg: 'rgba(255,80,80,0.12)', border: 'rgba(255,80,80,0.2)', text: '#f88' },
-        info: { bg: 'rgba(91,124,250,0.12)', border: 'rgba(91,124,250,0.2)', text: '#b8c8ff' },
-    };
-    const c = colors[type] || colors.info;
-    toast.style.background = c.bg;
-    toast.style.borderColor = c.border;
-    toast.style.color = c.text;
-    clearTimeout(toast._timer);
-    toast._timer = setTimeout(() => { toast.style.display = 'none'; }, 4000);
-}
-
-// ---------- 代理转发 ----------
-function getProxyBase() {
-    return window.location.origin;
-}
-
-async function proxyFetch(targetUrl, method, headers, body, isStream = false) {
-    const proxyUrl = `${getProxyBase()}/api/proxy`;
-    const payload = {
-        targetUrl: targetUrl,
-        method: method,
-        headers: headers || {},
-        body: body,
-        isStream: isStream,
-    };
-
-    const fetchHeaders = { 'Content-Type': 'application/json' };
-    const csrf = getCsrfToken();
-    if (csrf) {
-        fetchHeaders['X-CSRF-Token'] = csrf;
-        fetchHeaders['x-csrf-token'] = csrf;
+// 初始化本地配置
+function initSettings() {
+    if (!extension_settings[EXT_NAME]) {
+        extension_settings[EXT_NAME] = structuredClone(DEFAULT_SETTINGS);
     }
-
-    const response = await fetch(proxyUrl, {
-        method: 'POST',
-        headers: fetchHeaders,
-        body: JSON.stringify(payload),
-        credentials: 'include',
-    });
-
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Proxy Error ${response.status}: ${errText}`);
-    }
-    return response;
+    loadExtensionSettings();
 }
 
-// ---------- UI HTML ----------
-function getPanelHTML() {
-    // 生成 API 类型选项
-    const typeOptions = Object.entries(API_TYPES).map(([key, val]) => 
-        `<option value="${key}" ${settings.apiType === key ? 'selected' : ''}>${val.label}</option>`
-    ).join('');
-
-    return `
-        <div id="ce-panel" style="
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 99999;
-            background: #1a1a2e;
-            border-radius: 16px;
-            width: 520px;
-            max-height: 85vh;
-            overflow-y: auto;
-            box-shadow: 0 16px 64px rgba(0,0,0,0.85);
-            border: 1px solid rgba(255,255,255,0.06);
-            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-            color: #e0e0e0;
-            padding: 0;
-            display: none;
-        ">
-            <div style="padding: 16px 24px 12px 24px; border-bottom: 1px solid rgba(255,255,255,0.06); display: flex; justify-content: space-between; align-items: center;">
-                <span style="font-size: 17px; font-weight: 600; color: #f0f0f0;">📝 角色提取器</span>
-                <button id="ce-close-panel" style="background:transparent; border:none; color:#666; font-size:20px; cursor:pointer; padding:2px 10px; border-radius:6px; transition:all 0.2s;" onmouseover="this.style.color='#eee'" onmouseout="this.style.color='#666'">✕</button>
-            </div>
-            <div style="padding: 20px 24px 24px 24px;">
-                <!-- API 类型选择 -->
-                <div style="margin-bottom: 14px;">
-                    <label for="ce-api-type" style="display: block; font-size: 12px; color: #999; margin-bottom: 4px; font-weight: 500;">API 类型</label>
-                    <select id="ce-api-type" style="width:100%; padding:10px 14px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:8px; color:#e0e0e0; font-size:13px; box-sizing:border-box; cursor:pointer;">
-                        ${typeOptions}
-                    </select>
-                </div>
-                <!-- 自定义端点（可编辑性由 API 类型决定） -->
-                <div id="ce-endpoint-row" style="margin-bottom: 14px;">
-                    <label for="ce-apiurl" style="display: block; font-size: 12px; color: #999; margin-bottom: 4px; font-weight: 500;">自定义端点（基础 URL）</label>
-                    <input type="text" id="ce-apiurl" placeholder="https://gcli.ggchan.dev/v1/chat/completions" style="width:100%; padding:10px 14px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:8px; color:#e0e0e0; font-size:13px; box-sizing:border-box; transition:border 0.2s, box-shadow 0.2s;" onfocus="this.style.borderColor='#5b7cfa'; this.style.boxShadow='0 0 0 3px rgba(91,124,250,0.15)'" onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.boxShadow='none'">
-                </div>
-                <!-- API Key -->
-                <div style="margin-bottom: 14px;">
-                    <label for="ce-apikey" style="display: block; font-size: 12px; color: #999; margin-bottom: 4px; font-weight: 500;">API Key</label>
-                    <input type="password" id="ce-apikey" placeholder="sk-..." style="width:100%; padding:10px 14px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:8px; color:#e0e0e0; font-size:13px; box-sizing:border-box; transition:border 0.2s, box-shadow 0.2s;" onfocus="this.style.borderColor='#5b7cfa'; this.style.boxShadow='0 0 0 3px rgba(91,124,250,0.15)'" onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.boxShadow='none'">
-                </div>
-                <!-- 模型输入 + datalist -->
-                <div style="margin-bottom: 14px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                        <label for="ce-model" style="font-size: 12px; color: #999; font-weight: 500;">选择或输入模型</label>
-                        <button id="ce-fetch-models-btn" style="background:transparent; border:none; color:#5b7cfa; cursor:pointer; font-size:12px; padding:2px 8px; border-radius:4px;" onmouseover="this.style.background='rgba(91,124,250,0.1)'" onmouseout="this.style.background='transparent'">🔄 刷新列表</button>
-                    </div>
-                    <input type="text" id="ce-model" list="ce-model-list" placeholder="gemini-2.0-flash" style="width:100%; padding:10px 14px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:8px; color:#e0e0e0; font-size:13px; box-sizing:border-box; transition:border 0.2s, box-shadow 0.2s;" onfocus="this.style.borderColor='#5b7cfa'; this.style.boxShadow='0 0 0 3px rgba(91,124,250,0.15)'" onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.boxShadow='none'">
-                    <datalist id="ce-model-list"></datalist>
-                </div>
-                <!-- 温度 + 上下文 + 最大输出 -->
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
-                    <div>
-                        <label for="ce-temperature" style="display: block; font-size: 12px; color: #999; margin-bottom: 4px; font-weight: 500;">温度</label>
-                        <input type="number" id="ce-temperature" min="0" max="1" step="0.05" style="width:100%; padding:10px 12px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:8px; color:#e0e0e0; font-size:13px; box-sizing:border-box;">
-                    </div>
-                    <div>
-                        <label for="ce-context" style="display: block; font-size: 12px; color: #999; margin-bottom: 4px; font-weight: 500;">上下文</label>
-                        <input type="number" id="ce-context" min="1" step="1000" style="width:100%; padding:10px 12px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:8px; color:#e0e0e0; font-size:13px; box-sizing:border-box;">
-                    </div>
-                    <div>
-                        <label for="ce-max-tokens" style="display: block; font-size: 12px; color: #999; margin-bottom: 4px; font-weight: 500;">最大输出</label>
-                        <input type="number" id="ce-max-tokens" min="1" step="100" style="width:100%; padding:10px 12px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:8px; color:#e0e0e0; font-size:13px; box-sizing:border-box;">
-                    </div>
-                </div>
-                <!-- 流式 -->
-                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px; padding: 6px 0;">
-                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: #ccc;">
-                        <input type="checkbox" id="ce-stream" style="width:16px; height:16px; accent-color:#5b7cfa; cursor:pointer;"> 流式
-                    </label>
-                </div>
-                <!-- 按钮 -->
-                <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 4px;">
-                    <button id="ce-test-btn" style="padding:10px 24px; background:rgba(255,255,255,0.07); color:#ccc; border:1px solid rgba(255,255,255,0.08); border-radius:8px; font-weight:500; font-size:13px; cursor:pointer; transition:all 0.2s; flex:1;" onmouseover="this.style.background='rgba(255,255,255,0.14)'" onmouseout="this.style.background='rgba(255,255,255,0.07)'">🔍 测试</button>
-                    <button id="ce-save-btn" style="padding:10px 24px; background:#5b7cfa; color:#fff; border:none; border-radius:8px; font-weight:600; font-size:13px; cursor:pointer; transition:all 0.2s; flex:1;" onmouseover="this.style.background='#4a6ae0'; transform:translateY(-1px)'" onmouseout="this.style.background='#5b7cfa'; transform:none'">💾 保存</button>
-                </div>
-                <div id="ce-toast" style="margin-top:16px; display:none; padding:10px 16px; border-radius:8px; font-size:13px; border:1px solid transparent; transition:all 0.3s;"></div>
-            </div>
-        </div>
-    `;
-}
-
-// ---------- 更新端点可编辑状态 ----------
-function updateEndpointEditability() {
-    const type = document.getElementById('ce-api-type')?.value;
-    const urlInput = document.getElementById('ce-apiurl');
-    if (!urlInput) return;
-
-    const config = API_TYPES[type];
-    if (config && !config.endpointEditable) {
-        urlInput.readOnly = true;
-        urlInput.style.opacity = '0.6';
-        urlInput.style.cursor = 'not-allowed';
-        urlInput.value = config.defaultUrl;
-    } else {
-        urlInput.readOnly = false;
-        urlInput.style.opacity = '1';
-        urlInput.style.cursor = '';
+// 状态提示文本
+function setStatus(text, type = "normal") {
+    const statusEl = document.getElementById("charTiquStatus");
+    if (!statusEl) return;
+    statusEl.textContent = text;
+    statusEl.style.padding = "8px 10px";
+    statusEl.style.borderRadius = "6px";
+    statusEl.style.margin = "10px 0";
+    statusEl.style.fontSize = "13px";
+    statusEl.style.background = "transparent";
+    statusEl.style.border = "none";
+    if (type === "success") {
+        statusEl.style.background = "rgba(46, 125, 50, 0.15)";
+        statusEl.style.border = "1px solid #2e7d32";
+    } else if (type === "error") {
+        statusEl.style.background = "rgba(198, 40, 40, 0.15)";
+        statusEl.style.border = "1px solid #c62828";
+    } else if (type === "loading") {
+        statusEl.style.background = "rgba(255, 152, 0, 0.15)";
+        statusEl.style.border = "1px solid #ff9800";
     }
 }
 
-// ---------- 创建面板 ----------
-function createPanel() {
-    if (document.getElementById('ce-panel')) return;
-    const div = document.createElement('div');
-    div.innerHTML = getPanelHTML();
-    document.body.appendChild(div.firstElementChild);
+// API连通测试
+async function testApiConnection() {
+    const cfg = extension_settings[EXT_NAME];
+    const baseUrl = cfg.apiBaseUrl.trim();
+    const apiKey = cfg.apiKey.trim();
+    const timeout = cfg.apiTimeout;
 
-    const panel = document.getElementById('ce-panel');
-    const closeBtn = document.getElementById('ce-close-panel');
-    const saveBtn = document.getElementById('ce-save-btn');
-    const testBtn = document.getElementById('ce-test-btn');
-    const fetchModelsBtn = document.getElementById('ce-fetch-models-btn');
-    const apiTypeSelect = document.getElementById('ce-api-type');
+    if (!baseUrl) {
+        setStatus("错误：请填写 API 基础地址", "error");
+        return false;
+    }
+    setStatus("正在连接 API 服务...", "loading");
 
-    // 关闭
-    closeBtn.addEventListener('click', () => {
-        panel.style.display = 'none';
-        panelVisible = false;
-    });
-    document.addEventListener('mousedown', (e) => {
-        if (panelVisible && panel.style.display === 'block') {
-            if (!panel.contains(e.target) && e.target.id !== 'ce-draggable-btn') {
-                panel.style.display = 'none';
-                panelVisible = false;
-            }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+
+    try {
+        const headers = { "Content-Type": "application/json" };
+        if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+
+        const res = await fetch(`${baseUrl}/health`, {
+            method: "GET",
+            headers,
+            signal: controller.signal
+        });
+        clearTimeout(timer);
+
+        if (res.ok) {
+            const data = await res.json().catch(() => ({}));
+            setStatus(`API 连接成功！服务返回：${JSON.stringify(data)}`, "success");
+            return true;
+        } else {
+            setStatus(`API 连接失败，HTTP状态码：${res.status}`, "error");
+            return false;
         }
-    });
-
-    // API 类型切换：自动更新端点、可编辑性
-    apiTypeSelect?.addEventListener('change', () => {
-        const type = apiTypeSelect.value;
-        const config = API_TYPES[type];
-        if (config) {
-            const urlInput = document.getElementById('ce-apiurl');
-            if (urlInput) urlInput.value = config.defaultUrl;
-            updateEndpointEditability();
+    } catch (err)
+        clearTimeout(timer);
+        if (err.name === "AbortError") {
+            setStatus(`连接超时(${timeout}ms)，检查API地址`, "error");
+        } else {
+            setStatus(`连接异常：${err.message}`, "error");
         }
-    });
-
-    // 保存
-    saveBtn.addEventListener('click', () => {
-        settings.apiType = document.getElementById('ce-api-type').value;
-        settings.apiUrl = document.getElementById('ce-apiurl').value.trim() || DEFAULT_SETTINGS.apiUrl;
-        settings.apiKey = document.getElementById('ce-apikey').value.trim();
-        settings.model = document.getElementById('ce-model').value.trim() || DEFAULT_SETTINGS.model;
-        settings.temperature = parseFloat(document.getElementById('ce-temperature').value) || 0.3;
-        settings.contextLength = parseInt(document.getElementById('ce-context').value) || 2000000;
-        settings.maxTokens = parseInt(document.getElementById('ce-max-tokens').value) || 65000;
-        settings.stream = document.getElementById('ce-stream').checked;
-        saveSettings();
-        showToast('✅ 设置已保存', 'success');
-    });
-
-    // 测试
-    testBtn.addEventListener('click', async () => {
-        const url = document.getElementById('ce-apiurl').value.trim();
-        const key = document.getElementById('ce-apikey').value.trim();
-        const model = document.getElementById('ce-model').value.trim() || 'gemini-2.0-flash';
-        if (!url) { showToast('⚠️ 请填写 API 地址', 'error'); return; }
-        if (!key) { showToast('⚠️ 请填写 API Key', 'error'); return; }
-        showToast('⏳ 测试连接中...', 'info');
-        try {
-            const requestBody = {
-                model: model,
-                messages: [{ role: 'user', content: 'Hi' }],
-                max_tokens: 5,
-                temperature: parseFloat(document.getElementById('ce-temperature').value) || 0.3,
-            };
-            const response = await proxyFetch(url, 'POST', {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${key}`,
-            }, requestBody, false);
-            const data = await response.json();
-            const modelUsed = data.model || model;
-            showToast(`✅ 连接成功！模型: ${modelUsed}`, 'success');
-        } catch (err) {
-            showToast(`❌ 连接失败: ${err.message}`, 'error');
-        }
-    });
-
-    // 获取模型
-    fetchModelsBtn.addEventListener('click', async () => {
-        const url = document.getElementById('ce-apiurl').value.trim();
-        const key = document.getElementById('ce-apikey').value.trim();
-        if (!url) { showToast('⚠️ 请填写 API 地址', 'error'); return; }
-        if (!key) { showToast('⚠️ 请填写 API Key', 'error'); return; }
-        let baseUrl = url.replace(/\/chat\/completions$/, '').replace(/\/+$/, '');
-        if (!baseUrl) baseUrl = url;
-        showToast('⏳ 获取模型列表中...', 'info');
-        try {
-            const response = await proxyFetch(`${baseUrl}/models`, 'GET', {
-                'Authorization': `Bearer ${key}`,
-            }, null, false);
-            const data = await response.json();
-            let models = [];
-            if (data.data && Array.isArray(data.data)) {
-                models = data.data.map(m => m.id || m);
-            } else if (data.models && Array.isArray(data.models)) {
-                models = data.models.map(m => m.id || m);
-            } else if (Array.isArray(data)) {
-                models = data.map(m => m.id || m);
-            }
-            const datalist = document.getElementById('ce-model-list');
-            datalist.innerHTML = '';
-            if (models.length > 0) {
-                const uniqueModels = [...new Set(models)];
-                uniqueModels.forEach(modelId => {
-                    const option = document.createElement('option');
-                    option.value = modelId;
-                    datalist.appendChild(option);
-                });
-                showToast(`✅ 获取到 ${uniqueModels.length} 个模型`, 'success');
-            } else {
-                showToast('⚠️ 未获取到模型列表，请手动输入', 'error');
-            }
-        } catch (err) {
-            showToast(`⚠️ 获取模型列表失败: ${err.message}，请手动输入`, 'error');
-        }
-    });
-
-    // 填充 UI 并初始化端点可编辑性
-    populateUI();
-    updateEndpointEditability();
+        return false;
+    }
 }
 
-function populateUI() {
-    document.getElementById('ce-api-type').value = settings.apiType;
-    document.getElementById('ce-apiurl').value = settings.apiUrl;
-    document.getElementById('ce-apikey').value = settings.apiKey;
-    document.getElementById('ce-model').value = settings.model;
-    document.getElementById('ce-temperature').value = settings.temperature;
-    document.getElementById('ce-context').value = settings.contextLength;
-    document.getElementById('ce-max-tokens').value = settings.maxTokens;
-    document.getElementById('ce-stream').checked = settings.stream;
-}
-
-// ---------- 可拖动图标 ----------
-function createDraggableButton() {
-    if (buttonCreated) return;
-    if (document.getElementById('ce-draggable-btn')) {
-        buttonCreated = true;
+// 渲染右下角悬浮抽屉面板（点击魔法棒菜单弹出）
+function renderDrawerPanel() {
+    let panel = document.getElementById(PANEL_ID);
+    if (panel) {
+        // 存在则切换显示隐藏
+        panel.style.display = panel.style.display === "none" ? "block" : "none";
         return;
     }
 
-    const button = document.createElement('div');
-    button.id = 'ce-draggable-btn';
-    button.innerHTML = '📝';
-    button.title = '角色提取器';
+    const cfg = extension_settings[EXT_NAME];
+    panel = document.createElement("div");
+    panel.id = PANEL_ID;
+    // 悬浮抽屉样式，对齐anima-rag弹窗
+    panel.style.position = "fixed";
+    panel.style.bottom = "60px";
+    panel.style.right = "20px";
+    panel.style.width = "420px";
+    panel.style.maxHeight = "80vh";
+    panel.style.overflowY = "auto";
+    panel.style.background = "var(--bg-secondary)";
+    panel.style.borderRadius = "10px";
+    panel.style.padding = "16px";
+    panel.style.border = "1px solid var(--border-color)";
+    panel.style.color = "var(--text-primary)";
+    panel.style.zIndex = "9999";
+    panel.style.fontFamily = "'Segoe UI', Roboto, sans-serif";
 
-    Object.assign(button.style, {
-        position: 'fixed',
-        bottom: '120px',
-        right: '30px',
-        width: '56px',
-        height: '56px',
-        borderRadius: '50%',
-        backgroundColor: '#5b7cfa',
-        color: '#fff',
-        fontSize: '28px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        boxShadow: '0 4px 16px rgba(91, 124, 250, 0.6)',
-        cursor: 'grab',
-        zIndex: '9999',
-        userSelect: 'none',
-        border: '2px solid rgba(255,255,255,0.3)',
-        fontFamily: 'sans-serif',
-        lineHeight: '1',
-        transition: 'transform 0.2s, box-shadow 0.2s',
-    });
+    panel.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h3 style="margin:0;">角色提取保存 - CharTiquBaocun</h3>
+            <button id="ctbCloseDrawer" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:18px;">✕</button>
+        </div>
 
-    button.addEventListener('mouseenter', () => {
-        button.style.transform = 'scale(1.1)';
-        button.style.boxShadow = '0 6px 24px rgba(91, 124, 250, 0.8)';
-    });
-    button.addEventListener('mouseleave', () => {
-        button.style.transform = 'scale(1)';
-        button.style.boxShadow = '0 4px 16px rgba(91, 124, 250, 0.6)';
-    });
+        <div style="margin-bottom:12px;">
+            <div style="font-size:15px;font-weight:600;margin:14px 0 8px 0;padding-bottom:6px;border-bottom:1px solid var(--border-color);display:flex;align-items:center;gap:6px;">
+                🔌 API 服务连接配置
+            </div>
 
-    button.addEventListener('click', () => {
-        const panel = document.getElementById('ce-panel');
-        if (!panel) return;
-        if (panel.style.display === 'block') {
-            panel.style.display = 'none';
-            panelVisible = false;
-        } else {
-            panel.style.display = 'block';
-            panelVisible = true;
-            panel.style.top = '50%';
-            panel.style.left = '50%';
-            panel.style.transform = 'translate(-50%, -50%)';
-        }
-    });
+            <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px;">
+                <label style="font-size:14px;">API 基础地址</label>
+                <input
+                    id="ctbApiUrl"
+                    value="${cfg.apiBaseUrl}"
+                    placeholder="http://127.0.0.1:8000/api"
+                    style="width:100%;box-sizing:border-box;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:8px 10px;color:var(--text-primary);font-size:14px;"
+                >
+                <div style="font-size:12px;color:var(--text-muted);">角色后端服务根接口地址，末尾不要带斜杠</div>
+            </div>
 
-    // 拖拽
-    let isDragging = false;
-    let startX, startY, origLeft, origTop;
+            <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px;">
+                <label style="font-size:14px;">API Key 密钥</label>
+                <input
+                    id="ctbApiKey"
+                    value="${cfg.apiKey}"
+                    placeholder="留空代表无需鉴权"
+                    style="width:100%;box-sizing:border-box;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:8px 10px;color:var(--text-primary);font-size:14px;"
+                >
+                <div style="font-size:12px;color:var(--text-muted);">Bearer Token 鉴权密钥</div>
+            </div>
 
-    button.addEventListener('mousedown', (e) => {
-        if (e.button !== 0) return;
-        isDragging = true;
-        button.style.cursor = 'grabbing';
-        const rect = button.getBoundingClientRect();
-        startX = e.clientX;
-        startY = e.clientY;
-        origLeft = rect.left;
-        origTop = rect.top;
-        e.preventDefault();
-    });
+            <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px;">
+                <label style="font-size:14px;">请求超时时间 (ms)</label>
+                <input
+                    id="ctbTimeout"
+                    type="number"
+                    min="3000"
+                    value="${cfg.apiTimeout}"
+                    style="width:100%;box-sizing:border-box;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;padding:8px 10px;color:var(--text-primary);font-size:14px;"
+                >
+            </div>
 
-    document.addEventListener('mousemove', (e) => {
-        if (!isDragging) return;
-        const dx = e.clientX - startX;
-        const dy = e.clientY - startY;
-        let newLeft = origLeft + dx;
-        let newTop = origTop + dy;
-        const maxX = window.innerWidth - button.offsetWidth;
-        const maxY = window.innerHeight - button.offsetHeight;
-        newLeft = Math.max(0, Math.min(newLeft, maxX));
-        newTop = Math.max(0, Math.min(newTop, maxY));
-        button.style.left = newLeft + 'px';
-        button.style.top = newTop + 'px';
-        button.style.right = 'auto';
-        button.style.bottom = 'auto';
-    });
+            <div style="display:flex;align-items:center;gap:10px;margin:8px 0;">
+                <button
+                    id="ctbTestConn"
+                    style="padding:8px 14px;border-radius:6px;border:none;cursor:pointer;font-size:14px;background:#4285f4;color:white;"
+                    onmouseover="this.style.opacity=0.85"
+                    onmouseout="this.style.opacity=1"
+                >测试API连接</button>
+                <button
+                    id="ctbSaveCfg"
+                    style="padding:8px 14px;border-radius:6px;border:1px solid var(--border-color);cursor:pointer;font-size:14px;background:var(--bg-tertiary);color:var(--text-primary);"
+                >保存配置</button>
+            </div>
 
-    document.addEventListener('mouseup', () => {
-        if (isDragging) {
-            isDragging = false;
-            button.style.cursor = 'grab';
-        }
-    });
+            <div id="charTiquStatus"></div>
+        </div>
 
-    document.body.appendChild(button);
-    buttonCreated = true;
-    console.log('[角色提取器] ✅ 图标已创建');
+        <div style="margin-bottom:12px;">
+            <div style="font-size:15px;font-weight:600;margin:14px 0 8px 0;padding-bottom:6px;border-bottom:1px solid var(--border-color);display:flex;align-items:center;gap:6px;">
+                📦 角色提取与保存（开发中）
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);">API连通后可拉取远程角色卡，本地保存至SillyTavern角色库，功能待扩展</div>
+        </div>
+    `;
+
+    document.body.appendChild(panel);
+    bindDrawerEvents(panel);
 }
 
-// ---------- 入口 ----------
-jQuery(async () => {
+// 弹窗交互绑定
+function bindDrawerEvents(panel) {
+    const cfg = extension_settings[EXT_NAME];
+    const urlInput = panel.querySelector("#ctbApiUrl");
+    const keyInput = panel.querySelector("#ctbApiKey");
+    const timeoutInput = panel.querySelector("#ctbTimeout");
+    const testBtn = panel.querySelector("#ctbTestConn");
+    const saveBtn = panel.querySelector("#ctbSaveCfg");
+    const closeBtn = panel.querySelector("#ctbCloseDrawer");
+
+    closeBtn.addEventListener("click", () => panel.remove());
+    saveBtn.addEventListener("click", () => {
+        cfg.apiBaseUrl = urlInput.value.trim();
+        cfg.apiKey = keyInput.value.trim();
+        cfg.apiTimeout = Number(timeoutInput.value);
+        saveSettingsDebounced();
+        setStatus("配置已本地保存！", "success");
+    });
+    testBtn.addEventListener("click", testApiConnection);
+}
+
+// 【关键修复1】监听APP_READY事件，ST完全加载后再注册菜单（原版anima-rag写法）
+function registerSidebarMenu() {
     try {
-        console.log('[角色提取器] 加载中...');
-        loadSettings();
-        createPanel();
-        createDraggableButton();
-        console.log('[角色提取器] ✅ 加载完成');
-    } catch (e) {
-        console.error('[角色提取器] ❌ 加载失败:', e);
+        // addMenuItem 标准三参数：FontAwesome图标类名, 菜单显示文字, 点击回调
+        window.SillyTavern.addMenuItem(
+            "fa-solid fa-folder-open", // 文件夹图标，和截图Anima图标体系统一
+            "角色提取保存",
+            renderDrawerPanel
+        );
+        console.log(`[${EXT_NAME}] ✅ 魔法棒侧边菜单注册成功`);
+    } catch (err) {
+        console.error(`[${EXT_NAME}] ❌ 菜单注册失败：`, err);
     }
-});
+}
+
+// ST标准扩展加载入口
+async function loadExtension() {
+    initSettings();
+    // 【关键修复2】等待ST核心APP就绪再注册菜单，杜绝时机问题
+    if (window.SillyTavern) {
+        window.SillyTavern.on("APP_READY", registerSidebarMenu);
+    } else {
+        // 兜底延迟重试
+        setTimeout(() => {
+            if (window.SillyTavern) window.SillyTavern.on("APP_READY", registerSidebarMenu);
+        }, 1000);
+    }
+    console.log(`[${EXT_NAME}] 扩展初始化完成，等待APP就绪注册菜单`);
+}
+
+// 扩展卸载
+function unloadExtension() {
+    const panel = document.getElementById(PANEL_ID);
+    if (panel) panel.remove();
+    console.log(`[${EXT_NAME}] 扩展已卸载`);
+}
+
+// ST必须导出生命周期函数
+export { loadExtension, unloadExtension };
