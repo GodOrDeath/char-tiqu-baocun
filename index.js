@@ -20,6 +20,7 @@ const DEFAULT_SETTINGS = {
 
 let settings = { ...DEFAULT_SETTINGS };
 let isExtracting = false;
+let settingsPanelVisible = false;
 
 // ---------- 工具函数 ----------
 function loadSettings() {
@@ -62,48 +63,19 @@ async function renderSettings() {
     } catch (e) { /* fallback */ }
 
     if (!html) {
-        // 如果 settings.html 加载失败，使用内联备用模板
         html = getFallbackSettingsHTML();
     }
 
-    // 找到扩展的容器并注入
+    // 创建设置面板容器（悬浮面板）
     const containerId = 'ce-ext-container';
     let $container = $(`#${containerId}`);
     if (!$container.length) {
-        // 在扩展菜单中创建条目
-        const $menu = $('#extensionsMenu .extensionsMenu');
-        if ($menu.length) {
-            const $item = $(`
-                <div class="extension" data-extension-id="char-tiqu-baocun" 
-                     style="display:flex; align-items:center; gap:8px; padding:4px 0;">
-                    <span style="font-weight:500;">📝 角色提取器</span>
-                    <button id="ce-toggle-btn" class="menu_button" 
-                            style="background:transparent; border:none; color:#aaa; cursor:pointer; font-size:14px; padding:2px 8px;">
-                        ⚙️
-                    </button>
-                </div>
-            `);
-            $menu.append($item);
-            $container = $(`<div id="${containerId}" style="display:none; padding:8px 4px;"></div>`);
-            $item.after($container);
-        } else {
-            // 后备：浮动按钮
-            const $btn = $(`<button id="ce-float-btn" style="position:fixed; bottom:80px; right:20px; z-index:9999; 
-                            background:#5b7cfa; color:#fff; border:none; border-radius:50%; width:48px; height:48px; 
-                            font-size:22px; cursor:pointer; box-shadow:0 4px 16px rgba(91,124,250,0.4);">
-                            📝</button>`);
-            $('body').append($btn);
-            $container = $(`<div id="${containerId}" style="display:none; position:fixed; bottom:140px; right:20px; 
-                            z-index:9998; background:#1e1e2a; border-radius:12px; width:420px; max-height:70vh; 
-                            overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.6); border:1px solid rgba(255,255,255,0.06);">
-                          </div>`);
-            $('body').append($container);
-            $btn.on('click', () => $container.slideToggle(200));
-        }
+        $container = $(`<div id="${containerId}" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:9999; background:#1e1e2a; border-radius:12px; width:480px; max-height:80vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.8); border:1px solid rgba(255,255,255,0.1);"></div>`);
+        $('body').append($container);
     }
 
     // 注入 HTML
-    $container.html(html).show();
+    $container.html(html);
 
     // 绑定 UI 事件
     bindUIEvents();
@@ -114,44 +86,129 @@ async function renderSettings() {
     // 更新状态显示
     updateStatusDisplay();
 
-    // 绑定 toggle 按钮
-    $('#ce-toggle-btn').off('click').on('click', () => {
-        $container.slideToggle(200);
+    // ---------- 在魔法棒菜单中添加条目 ----------
+    addToMagicWandMenu(() => {
+        // 切换面板显示
+        if ($container.is(':visible')) {
+            $container.hide();
+            settingsPanelVisible = false;
+        } else {
+            $container.show();
+            settingsPanelVisible = true;
+        }
     });
+
+    // 点击面板外部关闭
+    $(document).off('click.ce').on('click.ce', function(e) {
+        if ($container.is(':visible') && !$(e.target).closest('#ce-ext-container').length && !$(e.target).closest('.ce-wand-item').length) {
+            $container.hide();
+            settingsPanelVisible = false;
+        }
+    });
+}
+
+// ---------- 添加到魔法棒菜单 ----------
+function addToMagicWandMenu(onClick) {
+    // 等待菜单容器加载
+    const checkInterval = setInterval(() => {
+        // 尝试找到魔法棒菜单的容器
+        // 常见选择器: #extensionsMenu .list-group, #extensionsMenu .dropdown-menu, 或 .extensionsMenu
+        let $menu = $('#extensionsMenu .list-group');
+        if (!$menu.length) {
+            $menu = $('#extensionsMenu .dropdown-menu');
+        }
+        if (!$menu.length) {
+            $menu = $('.extensionsMenu .list-group');
+        }
+        if (!$menu.length) {
+            // 如果找不到，尝试通过按钮定位
+            const $wandBtn = $('#extensionsMenuButton, .extensionsMenuButton, [data-i18n="Extensions"]');
+            if ($wandBtn.length) {
+                // 如果按钮存在但菜单未加载，等待
+                return;
+            }
+        }
+
+        if ($menu.length) {
+            clearInterval(checkInterval);
+            
+            // 检查是否已添加，避免重复
+            if ($menu.find('.ce-wand-item').length) {
+                return;
+            }
+
+            // 创建菜单项
+            const $item = $(`
+                <a href="#" class="list-group-item list-group-item-action ce-wand-item" data-extension-id="char-tiqu-baocun" style="display:flex; align-items:center; gap:8px; padding:8px 12px; color:#e0e0e0; text-decoration:none;">
+                    <span style="font-size:16px;">📝</span>
+                    <span>角色提取器</span>
+                </a>
+            `);
+
+            $item.on('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof onClick === 'function') onClick();
+                // 关闭菜单（如果菜单是下拉式的）
+                const $dropdown = $(this).closest('.dropdown-menu, .list-group');
+                if ($dropdown.length) {
+                    // 有些菜单点击后不会自动关闭，手动触发
+                }
+            });
+
+            $menu.append($item);
+            console.log('[角色提取器] ✅ 已添加到魔法棒菜单');
+        }
+    }, 500);
+
+    // 超时停止检查
+    setTimeout(() => clearInterval(checkInterval), 10000);
 }
 
 // ---------- 备用 HTML ----------
 function getFallbackSettingsHTML() {
     return `
-        <div id="ce-settings-container" style="padding:12px 16px; color:#e0e0e0;">
-            <h3 style="margin:0 0 12px 0;">📝 角色提取器</h3>
-            <label style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+        <div id="ce-settings-container" style="padding:16px 20px; color:#e0e0e0; font-family: sans-serif;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:12px;">
+                <h3 style="margin:0; font-size:18px;">📝 角色提取器</h3>
+                <button id="ce-close-panel" style="background:transparent; border:none; color:#888; font-size:20px; cursor:pointer;">✕</button>
+            </div>
+            <label style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
                 <input type="checkbox" id="ce-enabled"> 启用插件
             </label>
-            <div style="margin-bottom:8px;">
-                <label style="display:block; font-size:12px; color:#999;">API 地址</label>
-                <input type="text" id="ce-apiurl" style="width:100%; padding:6px; background:#2a2a3a; border:1px solid #444; border-radius:4px; color:#e0e0e0;">
+            <div style="margin-bottom:10px;">
+                <label style="display:block; font-size:12px; color:#999; margin-bottom:4px;">API 地址</label>
+                <input type="text" id="ce-apiurl" style="width:100%; padding:8px 10px; background:#2a2a3a; border:1px solid #444; border-radius:6px; color:#e0e0e0; box-sizing:border-box;">
             </div>
-            <div style="margin-bottom:8px;">
-                <label style="display:block; font-size:12px; color:#999;">API Key</label>
-                <input type="password" id="ce-apikey" style="width:100%; padding:6px; background:#2a2a3a; border:1px solid #444; border-radius:4px; color:#e0e0e0;">
+            <div style="margin-bottom:10px;">
+                <label style="display:block; font-size:12px; color:#999; margin-bottom:4px;">API Key</label>
+                <input type="password" id="ce-apikey" style="width:100%; padding:8px 10px; background:#2a2a3a; border:1px solid #444; border-radius:6px; color:#e0e0e0; box-sizing:border-box;">
             </div>
-            <div style="margin-bottom:8px;">
-                <label style="display:block; font-size:12px; color:#999;">模型</label>
-                <input type="text" id="ce-model" style="width:100%; padding:6px; background:#2a2a3a; border:1px solid #444; border-radius:4px; color:#e0e0e0;">
+            <div style="margin-bottom:10px;">
+                <label style="display:block; font-size:12px; color:#999; margin-bottom:4px;">模型</label>
+                <input type="text" id="ce-model" style="width:100%; padding:8px 10px; background:#2a2a3a; border:1px solid #444; border-radius:6px; color:#e0e0e0; box-sizing:border-box;">
             </div>
-            <div style="margin-bottom:12px;">
-                <label style="display:block; font-size:12px; color:#999;">分析最近消息数</label>
-                <input type="number" id="ce-maxmessages" style="width:100%; padding:6px; background:#2a2a3a; border:1px solid #444; border-radius:4px; color:#e0e0e0;">
+            <div style="margin-bottom:14px;">
+                <label style="display:block; font-size:12px; color:#999; margin-bottom:4px;">分析最近消息数</label>
+                <input type="number" id="ce-maxmessages" style="width:100%; padding:8px 10px; background:#2a2a3a; border:1px solid #444; border-radius:6px; color:#e0e0e0; box-sizing:border-box;">
             </div>
-            <button id="ce-save-btn" style="padding:6px 16px; background:#5b7cfa; color:#fff; border:none; border-radius:4px; cursor:pointer;">💾 保存</button>
-            <div id="ce-toast" style="margin-top:10px; display:none; padding:8px; border-radius:4px; background:#2a2a3a;"></div>
+            <div style="display:flex; gap:10px;">
+                <button id="ce-save-btn" style="padding:8px 20px; background:#5b7cfa; color:#fff; border:none; border-radius:6px; cursor:pointer;">💾 保存</button>
+                <button id="ce-test-btn" style="padding:8px 20px; background:rgba(255,255,255,0.1); color:#ccc; border:none; border-radius:6px; cursor:pointer;">🔍 测试</button>
+            </div>
+            <div id="ce-toast" style="margin-top:12px; display:none; padding:10px; border-radius:6px; background:rgba(91,124,250,0.15); border:1px solid rgba(91,124,250,0.25); color:#b8c8ff;"></div>
         </div>
     `;
 }
 
 // ---------- 绑定 UI 事件 ----------
 function bindUIEvents() {
+    // 关闭面板
+    $('#ce-close-panel').off('click').on('click', function() {
+        $('#ce-ext-container').hide();
+        settingsPanelVisible = false;
+    });
+
     // 保存按钮
     $('#ce-save-btn').off('click').on('click', () => {
         settings.enabled = $('#ce-enabled').prop('checked');
@@ -199,7 +256,7 @@ function bindUIEvents() {
                 showToast('✅ 连接成功！', 'success');
             } else {
                 const text = await resp.text();
-                showToast(`❌ 连接失败 (${resp.status}): ${text.slice(0, 100)}`, 'error');
+                showToast(`❌ 连接失败 (${resp.status})`, 'error');
             }
         } catch (e) {
             showToast(`❌ 连接异常: ${e.message}`, 'error');
@@ -462,7 +519,6 @@ function setupListener() {
                 .join('\n');
 
             if (conversationText.trim().length < 20) {
-                // 对话太短，跳过
                 isExtracting = false;
                 return;
             }
