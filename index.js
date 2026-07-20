@@ -1,6 +1,7 @@
 // ============================================================
 // 角色提取保存 扩展 - 通用 OpenAI 格式 API 配置面板
-// 支持通过酒馆后端代理，解决 CORS 跨域问题
+// 支持代理模式（通过酒馆后端转发），解决 CORS 跨域问题
+// 参考千夜浮梦插件的 API 设置架构
 // ============================================================
 
 console.log('[角色提取保存] 扩展加载中...');
@@ -207,10 +208,10 @@ console.log('[角色提取保存] 扩展加载中...');
 
     // 填充已保存的值
     const saved = loadSettings();
-    urlInput.value = saved.url || 'https://gcli.ggchan.dev/v1';
+    urlInput.value = saved.url || 'https://api.openai.com/v1';
     keyInput.value = saved.key || '';
     proxyCheck.checked = saved.proxy !== undefined ? saved.proxy : true;
-    modelInput.value = saved.model || 'gemini-3.1-pro-preview';
+    modelInput.value = saved.model || 'gpt-3.5-turbo';
     tempInput.value = saved.temperature ?? 1;
     ctxInput.value = saved.context ?? 2000000;
     maxInput.value = saved.max_tokens ?? 65000;
@@ -222,9 +223,9 @@ console.log('[角色提取保存] 扩展加载中...');
         if (enabled) {
             urlInput.disabled = true;
             keyInput.disabled = true;
-            urlInput.value = '/api/backends/openai/chat/completions';
+            urlInput.value = '/api/backends/openai/chat/completions';  // 酒馆内置代理端点
             keyInput.value = '';
-            // 清空模型列表
+            // 清空模型列表（代理模式下模型列表不通过外部获取，需要走酒馆内部）
             modelList.innerHTML = '';
         } else {
             urlInput.disabled = false;
@@ -279,8 +280,9 @@ console.log('[角色提取保存] 扩展加载中...');
         }
     }
 
-    // ---------- API 调用函数 ----------
+    // ---------- API 调用函数（核心） ----------
     async function callOpenAI(messages, options = {}) {
+        const useProxy = proxyCheck.checked;
         let url = urlInput.value.trim();
         const key = keyInput.value.trim();
         const model = modelInput.value.trim() || 'gpt-3.5-turbo';
@@ -289,17 +291,18 @@ console.log('[角色提取保存] 扩展加载中...');
         const stream = streamCheck.checked;
 
         if (!url) throw new Error('请填写 API 端点地址');
-        if (!proxyCheck.checked && !key) throw new Error('请填写 API Key');
+        if (!useProxy && !key) throw new Error('请填写 API Key');
 
-        // 如果启用代理，强制使用代理路径
-        if (proxyCheck.checked) {
+        // 如果启用代理，强制使用酒馆后端代理路径
+        if (useProxy) {
             url = '/api/backends/openai/chat/completions';
         }
 
         const headers = {
             'Content-Type': 'application/json',
         };
-        if (!proxyCheck.checked) {
+        // 代理模式下不传递 Authorization，由酒馆后端使用当前登录用户的 API Key
+        if (!useProxy && key) {
             headers['Authorization'] = `Bearer ${key}`;
         }
 
@@ -316,7 +319,7 @@ console.log('[角色提取保存] 扩展加载中...');
             method: 'POST',
             headers,
             body: JSON.stringify(body),
-            credentials: 'same-origin'  // 确保代理请求发送 cookies
+            credentials: 'same-origin',   // 携带 cookie 以便酒馆识别用户
         });
 
         if (!resp.ok) {
@@ -324,6 +327,7 @@ console.log('[角色提取保存] 扩展加载中...');
             throw new Error(`HTTP ${resp.status}: ${errText}`);
         }
 
+        // 处理流式响应（仅当 stream=true）
         if (stream) {
             const reader = resp.body.getReader();
             const decoder = new TextDecoder();
@@ -340,7 +344,7 @@ console.log('[角色提取保存] 扩展加载中...');
                         const parsed = JSON.parse(data);
                         const content = parsed.choices?.[0]?.delta?.content;
                         if (content) result += content;
-                    } catch (e) {}
+                    } catch (e) { /* 忽略解析错误 */ }
                 }
             }
             return result;
@@ -369,11 +373,13 @@ console.log('[角色提取保存] 扩展加载中...');
 
     // ---------- 获取模型列表 ----------
     async function listModels() {
+        const useProxy = proxyCheck.checked;
         const url = urlInput.value.trim();
         const key = keyInput.value.trim();
         let modelsUrl;
-        if (proxyCheck.checked) {
-            modelsUrl = '/api/backends/openai/models';
+
+        if (useProxy) {
+            modelsUrl = '/api/backends/openai/models';  // 酒馆后端代理的模型列表端点
         } else {
             if (!url) { setStatus('⚠️ 请先填写 API 端点', 'error'); return; }
             if (!key) { setStatus('⚠️ 请先填写 API Key', 'error'); return; }
@@ -384,7 +390,7 @@ console.log('[角色提取保存] 扩展加载中...');
         showResponse('');
         try {
             const headers = {};
-            if (!proxyCheck.checked) {
+            if (!useProxy && key) {
                 headers['Authorization'] = `Bearer ${key}`;
             }
             const resp = await fetch(modelsUrl, {
