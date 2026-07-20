@@ -1,6 +1,7 @@
 // ================================================================
 // 📝 角色提取器 (char-tiqu-baocun)
 // 通过 SillyTavern 后端代理转发 API 请求，解决 CORS
+// 模型输入支持手动输入 + 下拉建议（datalist）
 // ================================================================
 
 import { getContext } from '../../../extensions.js';
@@ -59,7 +60,6 @@ function showToast(message, type = 'info') {
 
 // ---------- 获取酒馆后端代理地址 ----------
 function getProxyBase() {
-    // 使用当前页面的 origin（例如 http://localhost:8000）
     return window.location.origin;
 }
 
@@ -180,7 +180,7 @@ function getPanelHTML() {
                      onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.boxShadow='none'">
                 </div>
 
-                <!-- 模型下拉菜单 + 刷新按钮 -->
+                <!-- 模型输入（带 datalist） -->
                 <div style="margin-bottom: 14px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                         <label for="ce-model" style="font-size: 12px; color: #999; font-weight: 500;">选择或输入模型</label>
@@ -197,7 +197,7 @@ function getPanelHTML() {
                             🔄 刷新列表
                         </button>
                     </div>
-                    <select id="ce-model" style="
+                    <input type="text" id="ce-model" list="ce-model-list" placeholder="gemini-3.1-pro-preview" style="
                         width: 100%;
                         padding: 10px 14px;
                         background: rgba(255,255,255,0.06);
@@ -206,11 +206,10 @@ function getPanelHTML() {
                         color: #e0e0e0;
                         font-size: 13px;
                         box-sizing: border-box;
-                        appearance: auto;
-                        cursor: pointer;
-                    ">
-                        <option value="">加载模型中...</option>
-                    </select>
+                        transition: border 0.2s, box-shadow 0.2s;
+                    " onfocus="this.style.borderColor='#5b7cfa'; this.style.boxShadow='0 0 0 3px rgba(91,124,250,0.15)'" 
+                     onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.boxShadow='none'">
+                    <datalist id="ce-model-list"></datalist>
                 </div>
 
                 <!-- 温度 + 上下文 + 最大输出 (一行三列) -->
@@ -349,10 +348,9 @@ function createPanel() {
 
     // 保存
     saveBtn.addEventListener('click', () => {
-        const modelSelect = document.getElementById('ce-model');
         settings.apiUrl = document.getElementById('ce-apiurl').value.trim() || DEFAULT_SETTINGS.apiUrl;
         settings.apiKey = document.getElementById('ce-apikey').value.trim();
-        settings.model = modelSelect.value || modelSelect.options[0]?.value || DEFAULT_SETTINGS.model;
+        settings.model = document.getElementById('ce-model').value.trim() || DEFAULT_SETTINGS.model;
         settings.temperature = parseFloat(document.getElementById('ce-temperature').value) || 0.3;
         settings.contextLength = parseInt(document.getElementById('ce-context').value) || 2000000;
         settings.maxTokens = parseInt(document.getElementById('ce-max-tokens').value) || 65000;
@@ -365,8 +363,7 @@ function createPanel() {
     testBtn.addEventListener('click', async () => {
         const url = document.getElementById('ce-apiurl').value.trim();
         const key = document.getElementById('ce-apikey').value.trim();
-        const modelSelect = document.getElementById('ce-model');
-        const model = modelSelect.value || modelSelect.options[0]?.value || 'gemini-3.1-pro-preview';
+        const model = document.getElementById('ce-model').value.trim() || 'gemini-3.1-pro-preview';
 
         if (!url) {
             showToast('⚠️ 请先填写 API 地址', 'error');
@@ -396,11 +393,11 @@ function createPanel() {
         }
     });
 
-    // 获取模型列表（通过代理）
+    // 获取模型列表（通过代理）并填充 datalist
     fetchModelsBtn.addEventListener('click', async () => {
         const url = document.getElementById('ce-apiurl').value.trim();
         const key = document.getElementById('ce-apikey').value.trim();
-        const modelSelect = document.getElementById('ce-model');
+        const datalist = document.getElementById('ce-model-list');
 
         if (!url) {
             showToast('⚠️ 请先填写 API 地址', 'error');
@@ -431,26 +428,22 @@ function createPanel() {
                 models = data.map(m => m.id || m);
             }
 
-            // 清空并填充下拉菜单
-            modelSelect.innerHTML = '';
+            // 清空并填充 datalist
+            datalist.innerHTML = '';
             if (models.length > 0) {
                 const uniqueModels = [...new Set(models)];
                 uniqueModels.forEach(modelId => {
                     const option = document.createElement('option');
                     option.value = modelId;
-                    option.textContent = modelId;
-                    modelSelect.appendChild(option);
+                    datalist.appendChild(option);
                 });
-                if (settings.model && uniqueModels.includes(settings.model)) {
-                    modelSelect.value = settings.model;
-                }
-                showToast(`✅ 获取到 ${uniqueModels.length} 个模型`, 'success');
+                showToast(`✅ 获取到 ${uniqueModels.length} 个模型，可在输入框选择`, 'success');
             } else {
-                modelSelect.innerHTML = '<option value="">未获取到模型</option>';
-                showToast('⚠️ 未获取到模型列表', 'error');
+                showToast('⚠️ 未获取到模型列表，请手动输入', 'error');
             }
         } catch (err) {
-            showToast(`❌ 获取失败: ${err.message}`, 'error');
+            // 如果获取失败（如403），提示用户手动输入
+            showToast(`⚠️ 获取模型列表失败 (${err.message})，请手动输入模型名称`, 'error');
         }
     });
 
@@ -461,10 +454,7 @@ function createPanel() {
 function populateUI() {
     document.getElementById('ce-apiurl').value = settings.apiUrl;
     document.getElementById('ce-apikey').value = settings.apiKey;
-    const modelSelect = document.getElementById('ce-model');
-    if (settings.model) {
-        modelSelect.innerHTML = `<option value="${settings.model}">${settings.model}</option>`;
-    }
+    document.getElementById('ce-model').value = settings.model;
     document.getElementById('ce-temperature').value = settings.temperature;
     document.getElementById('ce-context').value = settings.contextLength;
     document.getElementById('ce-max-tokens').value = settings.maxTokens;
