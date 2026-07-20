@@ -1,15 +1,12 @@
 // ================================================================
 // 📝 角色提取器 (char-tiqu-baocun)
-// 功能：可拖动图标 + OpenAI 格式 API 配置面板
+// 功能：可拖动图标 + OpenAI 格式 API 配置面板（支持多 API 类型）
 // 通过 /api/proxy 转发请求，解决 CORS（已修复 403 认证问题）
 // ================================================================
 
-// 注意：原 import 可能在酒馆的非模块环境下无效，改用全局获取上下文
-// import { getContext } from '../../../extensions.js';
-
 // ---------- 默认设置 ----------
 const DEFAULT_SETTINGS = {
-    apiType: 'custom_openai',
+    apiType: 'custom_openai',          // 新增：API 类型 key
     apiUrl: 'https://gcli.ggchan.dev/v1/chat/completions',
     apiKey: '',
     model: 'gemini-2.0-flash',
@@ -19,6 +16,21 @@ const DEFAULT_SETTINGS = {
     stream: false,
 };
 
+// 支持的 API 类型列表（显示名称 + 默认端点）
+const API_TYPES = {
+    custom_openai: {
+        label: '自定义 OpenAI',
+        defaultUrl: 'https://gcli.ggchan.dev/v1/chat/completions',
+        endpointEditable: true,
+    },
+    anthropic: {
+        label: 'Anthropic (Claude)',
+        defaultUrl: 'https://api.anthropic.com/v1/messages',
+        endpointEditable: false,
+    },
+    // 可继续添加更多类型...
+};
+
 let settings = { ...DEFAULT_SETTINGS };
 let panelVisible = false;
 let buttonCreated = false;
@@ -26,13 +38,11 @@ let buttonCreated = false;
 // ---------- 辅助：获取酒馆上下文中的 CSRF Token ----------
 function getCsrfToken() {
     try {
-        // 尝试通过酒馆全局对象获取
         if (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) {
             const ctx = SillyTavern.getContext();
             if (ctx.csrfToken) return ctx.csrfToken;
         }
     } catch (e) { /* ignore */ }
-    // 备选：从页面 meta 标签获取
     const meta = document.querySelector('meta[name="csrf-token"]');
     if (meta) return meta.content;
     return '';
@@ -74,7 +84,7 @@ function showToast(message, type = 'info') {
     toast._timer = setTimeout(() => { toast.style.display = 'none'; }, 4000);
 }
 
-// ---------- 代理转发（修复 403：携带 Cookie 和 CSRF Token）----------
+// ---------- 代理转发 ----------
 function getProxyBase() {
     return window.location.origin;
 }
@@ -85,20 +95,14 @@ async function proxyFetch(targetUrl, method, headers, body, isStream = false) {
         targetUrl: targetUrl,
         method: method,
         headers: headers || {},
-        body: body, // 对象，代理会 JSON.stringify
+        body: body,
         isStream: isStream,
     };
 
-    // 构建向代理的请求头
-    const fetchHeaders = {
-        'Content-Type': 'application/json',
-    };
-
-    // 添加 CSRF Token（如果存在）
+    const fetchHeaders = { 'Content-Type': 'application/json' };
     const csrf = getCsrfToken();
     if (csrf) {
         fetchHeaders['X-CSRF-Token'] = csrf;
-        // 某些版本可能用小写
         fetchHeaders['x-csrf-token'] = csrf;
     }
 
@@ -106,7 +110,7 @@ async function proxyFetch(targetUrl, method, headers, body, isStream = false) {
         method: 'POST',
         headers: fetchHeaders,
         body: JSON.stringify(payload),
-        credentials: 'include', // 携带 Cookie，必须！
+        credentials: 'include',
     });
 
     if (!response.ok) {
@@ -118,6 +122,11 @@ async function proxyFetch(targetUrl, method, headers, body, isStream = false) {
 
 // ---------- UI HTML ----------
 function getPanelHTML() {
+    // 生成 API 类型选项
+    const typeOptions = Object.entries(API_TYPES).map(([key, val]) => 
+        `<option value="${key}" ${settings.apiType === key ? 'selected' : ''}>${val.label}</option>`
+    ).join('');
+
     return `
         <div id="ce-panel" style="
             position: fixed;
@@ -142,15 +151,15 @@ function getPanelHTML() {
                 <button id="ce-close-panel" style="background:transparent; border:none; color:#666; font-size:20px; cursor:pointer; padding:2px 10px; border-radius:6px; transition:all 0.2s;" onmouseover="this.style.color='#eee'" onmouseout="this.style.color='#666'">✕</button>
             </div>
             <div style="padding: 20px 24px 24px 24px;">
-                <!-- API 类型 -->
+                <!-- API 类型选择 -->
                 <div style="margin-bottom: 14px;">
-                    <label style="display: block; font-size: 12px; color: #999; margin-bottom: 4px; font-weight: 500;">API 类型</label>
-                    <div style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:8px 14px; font-size:14px; color:#ccc; display:flex; align-items:center; gap:8px;">
-                        <span style="color:#5b7cfa;">●</span> 自定义 OpenAI
-                    </div>
+                    <label for="ce-api-type" style="display: block; font-size: 12px; color: #999; margin-bottom: 4px; font-weight: 500;">API 类型</label>
+                    <select id="ce-api-type" style="width:100%; padding:10px 14px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:8px; color:#e0e0e0; font-size:13px; box-sizing:border-box; cursor:pointer;">
+                        ${typeOptions}
+                    </select>
                 </div>
-                <!-- 自定义端点 -->
-                <div style="margin-bottom: 14px;">
+                <!-- 自定义端点（可编辑性由 API 类型决定） -->
+                <div id="ce-endpoint-row" style="margin-bottom: 14px;">
                     <label for="ce-apiurl" style="display: block; font-size: 12px; color: #999; margin-bottom: 4px; font-weight: 500;">自定义端点（基础 URL）</label>
                     <input type="text" id="ce-apiurl" placeholder="https://gcli.ggchan.dev/v1/chat/completions" style="width:100%; padding:10px 14px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:8px; color:#e0e0e0; font-size:13px; box-sizing:border-box; transition:border 0.2s, box-shadow 0.2s;" onfocus="this.style.borderColor='#5b7cfa'; this.style.boxShadow='0 0 0 3px rgba(91,124,250,0.15)'" onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.boxShadow='none'">
                 </div>
@@ -200,6 +209,25 @@ function getPanelHTML() {
     `;
 }
 
+// ---------- 更新端点可编辑状态 ----------
+function updateEndpointEditability() {
+    const type = document.getElementById('ce-api-type')?.value;
+    const urlInput = document.getElementById('ce-apiurl');
+    if (!urlInput) return;
+
+    const config = API_TYPES[type];
+    if (config && !config.endpointEditable) {
+        urlInput.readOnly = true;
+        urlInput.style.opacity = '0.6';
+        urlInput.style.cursor = 'not-allowed';
+        urlInput.value = config.defaultUrl;
+    } else {
+        urlInput.readOnly = false;
+        urlInput.style.opacity = '1';
+        urlInput.style.cursor = '';
+    }
+}
+
 // ---------- 创建面板 ----------
 function createPanel() {
     if (document.getElementById('ce-panel')) return;
@@ -212,13 +240,13 @@ function createPanel() {
     const saveBtn = document.getElementById('ce-save-btn');
     const testBtn = document.getElementById('ce-test-btn');
     const fetchModelsBtn = document.getElementById('ce-fetch-models-btn');
+    const apiTypeSelect = document.getElementById('ce-api-type');
 
     // 关闭
     closeBtn.addEventListener('click', () => {
         panel.style.display = 'none';
         panelVisible = false;
     });
-    // 点击外部关闭
     document.addEventListener('mousedown', (e) => {
         if (panelVisible && panel.style.display === 'block') {
             if (!panel.contains(e.target) && e.target.id !== 'ce-draggable-btn') {
@@ -228,8 +256,20 @@ function createPanel() {
         }
     });
 
+    // API 类型切换：自动更新端点、可编辑性
+    apiTypeSelect?.addEventListener('change', () => {
+        const type = apiTypeSelect.value;
+        const config = API_TYPES[type];
+        if (config) {
+            const urlInput = document.getElementById('ce-apiurl');
+            if (urlInput) urlInput.value = config.defaultUrl;
+            updateEndpointEditability();
+        }
+    });
+
     // 保存
     saveBtn.addEventListener('click', () => {
+        settings.apiType = document.getElementById('ce-api-type').value;
         settings.apiUrl = document.getElementById('ce-apiurl').value.trim() || DEFAULT_SETTINGS.apiUrl;
         settings.apiKey = document.getElementById('ce-apikey').value.trim();
         settings.model = document.getElementById('ce-model').value.trim() || DEFAULT_SETTINGS.model;
@@ -308,11 +348,13 @@ function createPanel() {
         }
     });
 
-    // 填充 UI
+    // 填充 UI 并初始化端点可编辑性
     populateUI();
+    updateEndpointEditability();
 }
 
 function populateUI() {
+    document.getElementById('ce-api-type').value = settings.apiType;
     document.getElementById('ce-apiurl').value = settings.apiUrl;
     document.getElementById('ce-apikey').value = settings.apiKey;
     document.getElementById('ce-model').value = settings.model;
